@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Etherscan API - Transaction List</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+      }
+      #results {
+        margin-top: 20px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background-color: #f2f2f2;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Etherscan API - Transaction List</h1>
+    <label for="address">Enter Ethereum addresses (comma-separated):</label>
+    <input type="text" id="address" placeholder="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae, 0x742d35Cc6634C0532925a3b844Bc454e4438f44e">
+    <button id="fetchTransactions">Fetch Transactions</button>
+
+    <div id="results"></div>
+
+    <script>
+      const apiKey = 'TJ5KZC3YERCK7ZEFQVCEAB8PV78XGC3IZ3';
+
+      async function getAllTransactions(fetchFunction, addresses) {
+        const allTransactions = [];
+        for (const address of addresses) {
+          const transactions = await fetchFunction(address);
+          allTransactions.push(...transactions);
+        }
+        return allTransactions;
+      }
+
+      async function fetchTransactionsWithDelay() {
+        const inputAddresses = document.getElementById('address').value;
+        const addresses = inputAddresses.split(',').map(a => a.trim());
+
+        const normalTransactions = await getAllTransactions(fetchNormalTransactions, addresses);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const internalTransactions = await getAllTransactions(fetchInternalTransactions, addresses);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const erc20Transfers = await getAllTransactions(getERC20Transfers, addresses);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const erc721Transfers = await getAllTransactions(getERC721Transfers, addresses);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const erc1155Transfers = await getAllTransactions(getERC1155Transfers, addresses);
+
+        displayTransactions(normalTransactions, internalTransactions, erc20Transfers, erc721Transfers, erc1155Transfers);
+      }
+
+      document.getElementById('fetchTransactions').addEventListener('click', fetchTransactionsWithDelay);
+
+
+      async function fetchNormalTransactions(address) {
+        const url = `https://api.etherscan.io/api?module=account&action=txlist&address=${address}&startblock=0&endblock=latest&page=1&offset=10000&sort=asc&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.result.map((tx) => ({ ...tx, type: 'normal' }));
+      }
+
+      async function fetchInternalTransactions(address) {
+        const url = `https://api.etherscan.io/api?module=account&action=txlistinternal&address=${address}&startblock=0&endblock=latest&page=1&offset=10000&sort=asc&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.result.map((tx) => ({ ...tx, type: 'internal' }));
+      }
+
+      async function getERC20Transfers(address) {
+        const url = `https://api.etherscan.io/api?module=account&action=tokentx&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.result.map((tx) => ({ ...tx, type: 'erc20' }));
+      }
+
+      async function getERC721Transfers(address) {
+        const url = `https://api.etherscan.io/api?module=account&action=tokennfttx&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.result.map((tx) => ({ ...tx, type: 'erc721' }));
+      }
+
+      async function getERC1155Transfers(address) {
+        const url = `https://api.etherscan.io/api?module=account&action=token1155tx&address=${address}&startblock=0&endblock=99999999&sort=asc&apikey=${apiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        return data.result.map((tx) => ({ ...tx, type: 'erc1155' }));
+      }
+
+      // Display transactions in a table
+
+	function displayTransactions(normalTransactions, internalTransactions, erc20Transfers, erc721Transfers, erc1155Transfers) {
+	  const resultsDiv = document.getElementById('results');
+	  resultsDiv.innerHTML = '';
+
+	  const transactions = normalTransactions.concat(internalTransactions, erc20Transfers, erc721Transfers, erc1155Transfers);
+	  transactions.sort((a, b) => parseInt(a.timeStamp) - parseInt(b.timeStamp));
+
+	  const table = document.createElement('table');
+	  table.innerHTML = `
+	    <tr>
+	      <th>Type</th>
+	      <th>Timestamp</th>
+	      <th>TX Hash</th>
+	      <th>Value</th>
+	      <th>Token Symbol</th>
+	      <th>From</th>
+	      <th>To</th>
+	      <th>Contract Address</th>
+	      <th>TokenID</th>
+	      <th>TX Fee (ETH)</th>
+	      <th>Token Name</th>
+	      <th>Gas Price (Gwei)</th>
+	      <th>TX Failed</th>
+	    </tr>
+	  `;
+
+	  transactions.forEach((tx) => {
+	    let value;
+	    let tokenSymbol;
+	    if (tx.type === 'normal' || tx.type === 'internal' || tx.type === 'erc20') {
+	      value = (parseInt(tx.value) / ((tx.type === 'erc20' && tx.tokenDecimal !== 'N/A') ? Math.pow(10, tx.tokenDecimal) : 1e18)).toFixed(6);
+	      tokenSymbol = (tx.type === 'internal' || tx.type === 'normal') ? 'ETH' : (tx.tokenSymbol || 'N/A');
+	    } else if (tx.type === 'erc721') {
+	      value = 1;
+	      tokenSymbol = tx.tokenSymbol + '-' + tx.tokenID;
+	    } else if (tx.type === 'erc1155') {
+	      value = tx.tokenValue;
+	      tokenSymbol = tx.tokenSymbol + '-' + tx.tokenID;
+	    }
+
+	    const transactionFee = ((parseInt(tx.gasPrice) * parseInt(tx.gasUsed)) / 1e18).toFixed(6);
+
+	    const row = document.createElement('tr');
+	    row.innerHTML = `
+	      <td>${tx.type}</td>
+	      <td>${new Date(tx.timeStamp * 1000).toLocaleString()}</td>
+	      <td>${tx.hash}</td>
+	      <td>${value}</td>
+	      <td>${tokenSymbol}</td>
+	      <td>${tx.from}</td>
+	      <td>${tx.to}</td>
+	      <td>${tx.contractAddress}</td>
+	      <td>${tx.tokenID || 'N/A'}</td>
+	      <td>${transactionFee}</td>
+	      <td>${tx.tokenName || 'N/A'}</td>
+	      <td>${(parseInt(tx.gasPrice) / 1e9).toFixed(6)}</td>
+	      <td>${tx.isError === '1' ? 'Yes' : 'No'}</td>
+	    `;
+	    table.appendChild(row);
+	  });
+
+	  resultsDiv.appendChild(table);
+	}
+
+      async function fetchTransactions() {
+        const address = document.getElementById('address').value;
+        if (!address) {
+          alert('Please enter an Ethereum address');
+          return;
+        }
+
+        const normalTransactions = await fetchNormalTransactions(address);
+        const internalTransactions = await fetchInternalTransactions(address);
+        const erc20Transfers = await getERC20Transfers(address);
+        const erc721Transfers = await getERC721Transfers(address);
+        const erc1155Transfers = await getERC1155Transfers(address);
+
+        displayTransactions(normalTransactions, internalTransactions, erc20Transfers, erc721Transfers, erc1155Transfers);
+      }
+
+      document.getElementById('fetchTransactions').addEventListener('click', fetchTransactions);
+    </script>
+  </body>
+</html>
+
