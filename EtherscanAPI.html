@@ -36,25 +36,23 @@
     <div id="summary"></div>
     <div id="results"></div>
 <script>
-    document.getElementById('fetchTransactions').addEventListener('click', fetchTransactionsWithDelay);
+    document.getElementById('fetchTransactions').addEventListener('click', fetchTransactions);
 
-	async function getAllTransactions(fetchFunction, addresses, action, apiKey, addressTransactionCounts) {
-	    const promises = addresses.map(async (address, index) => {
-		// Add a delay based on the index to spread out API requests
-		await new Promise(resolve => setTimeout(resolve, index * 400)); // 400 ms between requests to avoid rate limit
-		return fetchFunction(address, action, apiKey);
-	    });
+    async function getAllTransactions(fetchTransactionsFunction, addresses, transactionType, apiKey, addressTransactionCounts) {
+        const promises = addresses.map(async (address, index) => {
+            await new Promise(resolve => setTimeout(resolve, index * 400));
+            return fetchTransactionsFunction(address, transactionType, apiKey);
+        });
 
-	    return Promise.all(promises).then(results => {
-		const allTransactions = results.flatMap(r => r.transactions);
-		results.forEach((curr, index) => {
-		    addressTransactionCounts[addresses[index]] += curr.transactionCount;
-		});
+        return Promise.all(promises).then(results => {
+            const allTransactions = results.flatMap(r => r.transactions);
+            results.forEach((curr, index) => {
+                addressTransactionCounts[addresses[index]] += curr.transactionCount;
+            });
 
-		return { allTransactions, addressTransactionCounts };
-	    });
-	}
-
+            return { allTransactions, addressTransactionCounts };
+        });
+    }
 
     function initializeAddressTransactionCounts(addresses) {
         const addressTransactionCounts = {};
@@ -62,85 +60,92 @@
         return addressTransactionCounts;
     }
 
-    async function fetchTransactionsWithDelay() {
+    async function fetchTransactions() {
         const apiKey = document.getElementById('apiKey').value;
         const inputAddresses = document.getElementById('address').value;
         const addresses = inputAddresses.split(',').map(a => a.trim());
 
-        const transactionTypes = [
-            { action: 'txlist', fetchFunction: fetchTransactionsAndTransfers },
-            { action: 'txlistinternal', fetchFunction: fetchTransactionsAndTransfers },
-            { action: 'tokentx', fetchFunction: fetchTransactionsAndTransfers },
-            { action: 'tokennfttx', fetchFunction: fetchTransactionsAndTransfers },
-            { action: 'token1155tx', fetchFunction: fetchTransactionsAndTransfers },
+        const transactionEndpoints = [
+            { transactionType: 'txlist', fetchTransactionsFunction: fetchAccountActivity },
+            { transactionType: 'txlistinternal', fetchTransactionsFunction: fetchAccountActivity },
+            { transactionType: 'tokentx', fetchTransactionsFunction: fetchAccountActivity },
+            { transactionType: 'tokennfttx', fetchTransactionsFunction: fetchAccountActivity },
+            { transactionType: 'token1155tx', fetchTransactionsFunction: fetchAccountActivity },
         ];
 
         const allTransactions = [];
-	    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
+        const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
 
-	    for (const transactionType of transactionTypes) {
-		const { allTransactions: transactions, addressTransactionCounts: transactionCounts } = await getAllTransactions(transactionType.fetchFunction, addresses, transactionType.action, apiKey, addressTransactionCounts);
+        for (const transactionEndpoint of transactionEndpoints) {
+            const { allTransactions: transactions, addressTransactionCounts: transactionCounts } = await getAllTransactions(transactionEndpoint.fetchTransactionsFunction, addresses, transactionEndpoint.transactionType, apiKey, addressTransactionCounts);
 
-		allTransactions.push(...transactions);
-		await new Promise(resolve => setTimeout(resolve, 1000));
-	    }
+            allTransactions.push(...transactions);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
 
         displaySummary(addressTransactionCounts, allTransactions.length);
         displayTransactions(allTransactions);
     }
 
-    function buildURL(action, address, apiKey) {
-        return `https://api.etherscan.io/api?module=account&action=${action}&address=${address}&startblock=0&endblock=latest&page=1&offset=10000&sort=asc&apikey=${apiKey}`;
+    function buildURL(transactionType, address, apiKey) {
+        return `https://api.etherscan.io/api?module=account&action=${transactionType}&address=${address}&startblock=0&endblock=latest&page=1&offset=10000&sort=asc&apikey=${apiKey}`;
     }
 
-	async function fetchData(action, address, apiKey, retries = 3) {
-	    const url = buildURL(action, address, apiKey);
-	    try {
-		const response = await fetch(url);
-		const data = await response.json();
+    async function fetchData(transactionType, address, apiKey, retries = 3) {
+        const url = buildURL(transactionType, address, apiKey);
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
 
-		if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-		    console.warn("Max rate limit reached. Retrying...");
-		    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
-		    return await fetchData(action, address, apiKey, retries - 1);
-		}
+            if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+                console.warn("Max rate limit reached. Retrying...");
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                return await fetchData(transactionType, address, apiKey, retries - 1);
+            }
 
-		return data;
-	    } catch (error) {
-		console.error("Error fetching data:", error);
-		return { result: [] };
-	    }
-	}
+            return data;
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            return { result: [] };
+        }
+    }
 
-	async function fetchTransactionsAndTransfers(address, action, apiKey) {
-	    const data = await fetchData(action, address, apiKey);
-	    const type = action === 'txlist' ? 'normal' : action === 'txlistinternal' ? 'internal' : action === 'tokentx' ? 'erc20' : action === 'tokennfttx' ? 'erc721' : 'erc1155';
-	    const transactionMapper = tx => ({ ...tx, type });
+    async function fetchAccountActivity(address, transactionType, apiKey) {
+        try {
+            const data = await fetchData(transactionType, address, apiKey);
+            const type = transactionType === 'txlist' ? 'normal' : transactionType === 'txlistinternal' ? 'internal' : transactionType === 'tokentx' ? 'erc20' : transactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
+            const transactionMapper = tx => ({ ...tx, type });
 
-	    if (Array.isArray(data.result)) {
-		return {
-		    transactions: data.result.map(transactionMapper),
-		    transactionCount: data.result.length,
-		};
-	    } else {
-		console.warn("Unexpected data format received:", data);
-		return {
-		    transactions: [],
-		    transactionCount: 0,
-		};
-	    }
-	}
+            if (Array.isArray(data.result)) {
+                return {
+                    transactions: data.result.map(transactionMapper),
+                    transactionCount: data.result.length,
+                };
+            } else {
+                console.warn("Unexpected data format received:", data);
+                return {
+                    transactions: [],
+                    transactionCount: 0,
+                };
+            }
+        } catch (error) {
+            console.error("Error fetching transactions and transfers:", error);
+            return {
+                transactions: [],
+                transactionCount: 0,
+            };
+        }
+    }
 
+    function displaySummary(addressTransactionCounts, totalCount) {
+        const summaryDiv = document.getElementById('summary');
+        const summaryItems = Object.entries(addressTransactionCounts).map(([address, count]) => `Entries found for ${address}: ${count}<br>`);
+        summaryDiv.innerHTML = `Total entries found: ${totalCount}<br>${summaryItems.join('')}`;
+    }
 
-	function displaySummary(addressTransactionCounts, totalCount) {
-	    const summaryDiv = document.getElementById('summary');
-	    const summaryItems = Object.entries(addressTransactionCounts).map(([address, count]) => `Entries found for ${address}: ${count}<br>`);
-	    summaryDiv.innerHTML = `Total entries found: ${totalCount}<br>${summaryItems.join('')}`;
-	}
-
-	function displayTransactions(transactions) {
-	    const resultsDiv = document.getElementById('results');
-	    resultsDiv.innerHTML = '';
+    function displayTransactions(transactions) {
+        const resultsDiv = document.getElementById('results');
+        resultsDiv.innerHTML = '';
 
         transactions.sort((a, b) => parseInt(a.timeStamp) - parseInt(b.timeStamp));
 
@@ -199,31 +204,32 @@
     }
 
     function getValue(tx) {
-        let value;
-        if (tx.type === 'normal' || tx.type === 'internal' || tx.type === 'erc20') {
-            value = (parseInt(tx.value) / ((tx.type === 'erc20' && tx.tokenDecimal !== 'N/A') ? Math.pow(10, tx.tokenDecimal) : 1e18)).toFixed(6);
+        if (['normal', 'internal', 'erc20'].includes(tx.type)) {
+            return getEthOrErc20Value(tx);
         } else if (tx.type === 'erc721') {
-            value = 1;
+            return 1;
         } else if (tx.type === 'erc1155') {
-            value = tx.tokenValue;
+            return tx.tokenValue;
         }
-        return value;
+    }
+
+    function getEthOrErc20Value(tx) {
+        const decimal = tx.type === 'erc20' && tx.tokenDecimal !== 'N/A' ? tx.tokenDecimal : 18;
+        return (parseInt(tx.value) / Math.pow(10, decimal)).toFixed(6);
     }
 
     function getTokenSymbol(tx) {
-        let tokenSymbol;
-        if (tx.type === 'internal' || tx.type === 'normal') {
-            tokenSymbol = 'ETH';
+        if (['internal', 'normal'].includes(tx.type)) {
+            return 'ETH';
         } else if (tx.type === 'erc20') {
-            tokenSymbol = tx.tokenSymbol || 'N/A';
-        } else if (tx.type === 'erc721') {
-            tokenSymbol = tx.tokenSymbol + '-' + tx.tokenID;
-        } else if (tx.type === 'erc1155') {
-            tokenSymbol = tx.tokenSymbol + '-' + tx.tokenID;
+            return tx.tokenSymbol || 'N/A';
+        } else if (['erc721', 'erc1155'].includes(tx.type)) {
+            return `${tx.tokenSymbol}-${tx.tokenID}`;
         }
-        return tokenSymbol;
     }
 </script>
+
+
 
   </body>
 </html>
