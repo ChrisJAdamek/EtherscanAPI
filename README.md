@@ -16,23 +16,6 @@ This is a very simple web application that retrieves and displays Ethereum trans
 4. Click the "Fetch and Display Transactions" button.
 5. The application will fetch the transaction data and display it in a table below the button.
 
-## Application Structure
-
-```html
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Etherscan API - Transaction List</title>
-    ...
-  </head>
-  <body>
-    ...
-    <script>
-      ...
-    </script>
-  </body>
-</html>
-
 The application consists of a single index.html file with embedded JavaScript and CSS. The JavaScript code fetches transaction data from the Etherscan API and renders it in an HTML table.
 
 ## Dependencies 
