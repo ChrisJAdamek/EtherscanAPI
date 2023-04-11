@@ -39,7 +39,7 @@
 <script>
   document.getElementById('fetchTransactions').addEventListener('click', fetchTransactionsWithDelay);
 
-  // Consolidate fetchTransactions and fetchTokenTransfers into a single function
+  
   async function fetchTransactionsAndTransfers(address, action, apiKey) {
     const url = buildURL(action, address, apiKey);
     const response = await fetch(url);
@@ -64,24 +64,37 @@
     };
   }
 
-	async function fetchTokenPrice(contractAddress, timestamp) {
-	  try {
-	    const url = `https://coins.llama.fi/prices/historical/${timestamp}/ethereum:${contractAddress}?searchWidth=6h`;
-	    console.log(`Fetching token price with URL: ${url}`); // Added console.log to print the URL
-	    const response = await fetch(url);
-	    const data = await response.json();
-	    
-	    if (data && data.coins && data.coins[`ethereum:${contractAddress}`]) {
-	      return data.coins[`ethereum:${contractAddress}`].price;
-	    } else {
-	      console.error(`Token price not found for contract address: ${contractAddress} and timestamp: ${timestamp}`);
-	      return 'N/A';
-	    }
-	  } catch (error) {
-	    console.error(`Error fetching token price for contract address: ${contractAddress} and timestamp: ${timestamp}`, error);
-	    return 'N/A';
-	  }
-	}
+  async function collectTokenPricesData(transactions) {
+    const tokenPricesData = {};
+
+    transactions.forEach((tx) => {
+      if (tx.type === 'erc20') {
+        if (!tokenPricesData[`ethereum:${tx.contractAddress}`]) {
+          tokenPricesData[`ethereum:${tx.contractAddress}`] = [];
+        }
+        if (!tokenPricesData[`ethereum:${tx.contractAddress}`].includes(tx.timeStamp)) {
+          tokenPricesData[`ethereum:${tx.contractAddress}`].push(tx.timeStamp);
+        }
+      }
+    });
+
+    return tokenPricesData;
+  }
+
+  async function fetchTokenPrices(tokenPricesData) {
+    const url = new URL('https://coins.llama.fi/batchHistorical');
+    const coinsString = JSON.stringify(tokenPricesData);
+    url.searchParams.append('coins', coinsString);
+    url.searchParams.append('searchWidth', '6h');
+
+    console.log(`Fetching token prices with URL: ${url}`);
+
+    const response = await fetch(url);
+    const data = await response.json();
+
+    return data.coins;
+  }
+
 
   async function getAllTransactions(fetchFunction, addresses, action, apiKey) {
     const allTransactions = [];
@@ -132,7 +145,15 @@
       }
       allTransactions.push(...transactions);
       await new Promise(resolve => setTimeout(resolve, 1000));
-    }
+      const tokenPricesData = await collectTokenPricesData(allTransactions);
+      const tokenPrices = await fetchTokenPrices(tokenPricesData);
+
+      displaySummary(addressTransactionCounts, allTransactions.length);
+      displayTransactions(allTransactions, tokenPrices); // Pass tokenPrices to the displayTransactions function
+
+      }
+
+
 
     displaySummary(addressTransactionCounts, allTransactions.length);
     await displayTransactions(allTransactions);
@@ -152,9 +173,9 @@
     summaryDiv.innerHTML = summaryText;
   }
 
-  async function displayTransactions(transactions) {
-    const resultsDiv = document.getElementById('results');
-    resultsDiv.innerHTML = '';
+    async function displayTransactions(transactions, tokenPrices) { // Add tokenPrices parameter
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '';
 
     transactions.sort((a, b) => parseInt(a.timeStamp) - parseInt(b.timeStamp));
 
@@ -178,14 +199,9 @@
     `;
 
     for (const tx of transactions) {
-      let tokenPrice = 'N/A';
-      if (tx.type === 'erc20') {
-        tokenPrice = await fetchTokenPrice(tx.contractAddress, tx.timeStamp);
-      }
-
       const value = getValue(tx);
       const tokenSymbol = getTokenSymbol(tx);
-
+      const tokenPrice = tx.type === 'erc20' ? tokenPrices[`ethereum:${tx.contractAddress}`].find(priceData => priceData.timestamp == tx.timeStamp)?.price || 'N/A' : 'N/A';
       const transactionFee = ((parseInt(tx.gasPrice) * parseInt(tx.gasUsed)) / 1e18).toFixed(6);
 
       const row = document.createElement('tr');
