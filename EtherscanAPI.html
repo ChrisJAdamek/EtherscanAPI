@@ -48,29 +48,35 @@
             this.baseUrl = "https://api.etherscan.io/api";
         }
 
-	buildURL(singleTransactionType, singleAddress) {
-	  return `${this.baseUrl}?module=account&action=${singleTransactionType}&address=${singleAddress}&startblock=0&endblock=latest&page=1&offset=10000&sort=asc&apikey=${this.apiKey}`;
+	    async fetchData(singleTransactionType, singleAddress, page = 1, retries = 3) {
+		const url = this.buildURL(singleTransactionType, singleAddress, page);
+		try {
+		    const response = await fetch(url);
+		    const data = await response.json();
+
+		    if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+		        console.warn("Max rate limit reached. Retrying...");
+		        await new Promise(resolve => setTimeout(resolve, 1000));
+		        return await this.fetchData(singleTransactionType, singleAddress, page, retries - 1);
+		    }
+
+		    if (data.result.length === 10000) {
+		        console.log("Fetching next page...");
+		        const nextPageData = await this.fetchData(singleTransactionType, singleAddress, page + 1);
+		        return data.result.concat(nextPageData);
+		    }
+
+		    return data.result;
+		} catch (error) {
+		    console.error("Error fetching data:", error);
+		    return [];
+		}
+	    }
+	    
+	    buildURL(singleTransactionType, singleAddress, page) {
+		return `${this.baseUrl}?module=account&action=${singleTransactionType}&address=${singleAddress}&startblock=0&endblock=latest&page=${page}&offset=10000&sort=asc&apikey=${this.apiKey}`;
+	    }
 	}
-
-        async fetchData(singleTransactionType, singleAddress, retries = 3) {
-            const url = this.buildURL(singleTransactionType, singleAddress);
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-
-                if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-                    console.warn("Max rate limit reached. Retrying...");
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    return await this.fetchData(singleTransactionType, singleAddress, retries - 1);
-                }
-
-                return data;
-            } catch (error) {
-                console.error("Error fetching data:", error);
-                return { result: [] };
-            }
-        }
-    }
     
 	async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi) {
 	    const promises = addresses.map(async (singleAddress, index) => {
@@ -124,32 +130,25 @@
 
 
 
-    async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
-        try {
-            const data = await etherscanApi.fetchData(singleTransactionType, singleAddress);
-            const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
-            const transactionMapper = tx => ({ ...tx, type });
+	async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
+	    try {
+		const records = await etherscanApi.fetchData(singleTransactionType, singleAddress);
+		const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
+		const transactionMapper = tx => ({ ...tx, type });
 
-            if (Array.isArray(data.result)) {
-                return {
-                    transactions: data.result.map(transactionMapper),
-                    transactionCount: data.result.length,
-                };
-            } else {
-                console.warn("Unexpected data format received:", data);
-                return {
-                    transactions: [],
-                    transactionCount: 0,
-                };
-            }
-        } catch (error) {
-            console.error("Error fetching transactions and transfers:", error);
-            return {
-                transactions: [],
-                transactionCount: 0,
-            };
-        }
-    }
+		return {
+		    transactions: records.map(transactionMapper),
+		    transactionCount: records.length,
+		};
+	    } catch (error) {
+		console.error("Error fetching transactions and transfers:", error);
+		return {
+		    transactions: [],
+		    transactionCount: 0,
+		};
+	    }
+	}
+
 
     function displayTransactionSummary(addressTransactionCounts, totalCount) {
         const summaryDiv = document.getElementById('summary');
