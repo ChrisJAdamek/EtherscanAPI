@@ -48,7 +48,7 @@
             this.baseUrl = "https://api.etherscan.io/api";
         }
 
-	    async fetchData(singleTransactionType, singleAddress, page = 1, retries = 3) {
+	    async fetchTransactionData({ singleTransactionType, singleAddress, page = 1, retries = 3 }) {
 		const url = this.buildURL(singleTransactionType, singleAddress, page);
 		try {
 		    const response = await fetch(url);
@@ -57,12 +57,12 @@
 		    if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
 		        console.warn("Max rate limit reached. Retrying...");
 		        await new Promise(resolve => setTimeout(resolve, 1000));
-		        return await this.fetchData(singleTransactionType, singleAddress, page, retries - 1);
+		        return await this.fetchTransactionData({ singleTransactionType, singleAddress, page, retries: retries - 1 });
 		    }
 
 		    if (data.result.length === 10000) {
 		        console.log("Fetching next page...");
-		        const nextPageData = await this.fetchData(singleTransactionType, singleAddress, page + 1);
+		        const nextPageData = await this.fetchTransactionData(singleTransactionType, singleAddress, page + 1);
 		        return data.result.concat(nextPageData);
 		    }
 
@@ -132,7 +132,7 @@
 
 	async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
 	    try {
-		const records = await etherscanApi.fetchData(singleTransactionType, singleAddress);
+		const records = await etherscanApi.fetchTransactionData({ singleTransactionType, singleAddress });
 		const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
 		const transactionMapper = tx => ({ ...tx, type });
 
@@ -150,11 +150,17 @@
 	}
 
 
-    function displayTransactionSummary(addressTransactionCounts, totalCount) {
-        const summaryDiv = document.getElementById('summary');
-        const summaryItems = Object.entries(addressTransactionCounts).map(([singleAddress, count]) => `Entries found for ${singleAddress}: ${count}<br>`);
-        summaryDiv.innerHTML = `Total entries found: ${totalCount}<br>${summaryItems.join('')}`;
-    }
+	function displayTransactionSummary(addressTransactionCounts, totalCount) {
+	    const summaryDiv = document.getElementById('summary');
+	    const summaryItems = generateSummaryItems(addressTransactionCounts);
+	    summaryDiv.innerHTML = `Total entries found: ${totalCount}<br>${summaryItems}`;
+	}
+
+	function generateSummaryItems(addressTransactionCounts) {
+	    return Object.entries(addressTransactionCounts)
+		.map(([singleAddress, count]) => `Entries found for ${singleAddress}: ${count}<br>`)
+		.join('');
+	}
 
     function displayTransactionTable(transactions) {
         const resultsDiv = document.getElementById('results');
@@ -166,34 +172,42 @@
         resultsDiv.appendChild(table);
     }
 
-    function createTransactionTable(transactions) {
-        const table = document.createElement('table');
-        const rows = transactions.map(tx => createTransactionTableRow(tx)).join('');
+	function createTransactionTable(transactions) {
+	    const table = document.createElement('table');
+	    const headers = createTransactionTableHeaders();
+	    const rows = createTransactionTableRows(transactions);
 
-        table.innerHTML = `
-            <tr>
-                <th>Type</th>
-                <th>Timestamp</th>
-                <th>TX Hash</th>
-                <th>Function</th>
-                <th>Value</th>
-                <th>Token Symbol</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Contract Address</th>
-                <th>TokenID</th>
-                <th>TX Fee (ETH)</th>
-                <th>Token Name</th>
-                <th>Gas Price (Gwei)</th>
-                <th>TX Failed</th>
-            </tr>
-            ${rows}
-        `;
+	    table.innerHTML = headers + rows;
+	    return table;
+	}
 
-        return table;
-    }
+	function createTransactionTableHeaders() {
+	    return `
+		<tr>
+		    <th>Type</th>
+		    <th>Timestamp</th>
+		    <th>TX Hash</th>
+		    <th>Function</th>
+		    <th>Value</th>
+		    <th>Token Symbol</th>
+		    <th>From</th>
+		    <th>To</th>
+		    <th>Contract Address</th>
+		    <th>TokenID</th>
+		    <th>TX Fee (ETH)</th>
+		    <th>Token Name</th>
+		    <th>Gas Price (Gwei)</th>
+		    <th>TX Failed</th>
+		</tr>
+	    `;
+	}
 
-	function createTransactionTableRow(tx) {
+
+	function createTransactionTableRows(transactions) {
+	    return transactions.map(tx => createEachTransactionTableRow(tx)).join('');
+	}
+
+	function createEachTransactionTableRow(tx) {
 	    const value = getTransactionValue(tx);
 	    const tokenSymbol = getTransactionTokenSymbol(tx);
 	    const transactionFee = ((parseInt(tx.gasPrice) * parseInt(tx.gasUsed)) / 1e18).toFixed(6);
@@ -218,6 +232,7 @@
 		</tr>
 	    `;
 	}
+
 
 
     function getTransactionValue(tx) {
