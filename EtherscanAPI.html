@@ -37,7 +37,7 @@
   <div id="results"></div>
 </body>
 
-< script >
+<script>
 	document.addEventListener('DOMContentLoaded', () => {
 		document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
 	});
@@ -114,84 +114,82 @@ function initializeAddressTransactionCounts(addresses) {
 }
 
 async function fetchAndDisplayTransactions() {
-	const etherscanApi = new EtherscanApi(document.getElementById('api-key').value);
-	const inputAddresses = document.getElementById('singleAddress').value;
-	const addresses = inputAddresses.split(',').map(a => a.trim());
+    const etherscanApi = new EtherscanApi(document.getElementById('api-key').value);
+    const inputAddresses = document.getElementById('singleAddress').value;
+    const addresses = inputAddresses.split(',').map(a => a.trim());
 
-	const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-	const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
-	displayAllTransactions(addressTransactionCounts, allTransactions);
+    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
+    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
+    displayAllTransactions(addressTransactionCounts, allTransactions);
 }
 
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
-	const transactionEndpoints = [{
-			singleTransactionType: 'txlist',
-			transactionFetchFunction: fetchSingleAddressTransactions
-		},
-		{
-			singleTransactionType: 'txlistinternal',
-			transactionFetchFunction: fetchSingleAddressTransactions
-		},
-		{
-			singleTransactionType: 'tokentx',
-			transactionFetchFunction: fetchSingleAddressTransactions
-		},
-		{
-			singleTransactionType: 'tokennfttx',
-			transactionFetchFunction: fetchSingleAddressTransactions
-		},
-		{
-			singleTransactionType: 'token1155tx',
-			transactionFetchFunction: fetchSingleAddressTransactions
-		},
-	];
+    const transactionEndpoints = [
+        { singleTransactionType: 'txlist', transactionFetchFunction: fetchSingleAddressTransactions },
+        { singleTransactionType: 'txlistinternal', transactionFetchFunction: fetchSingleAddressTransactions },
+        { singleTransactionType: 'tokentx', transactionFetchFunction: fetchSingleAddressTransactions },
+        { singleTransactionType: 'tokennfttx', transactionFetchFunction: fetchSingleAddressTransactions },
+        { singleTransactionType: 'token1155tx', transactionFetchFunction: fetchSingleAddressTransactions },
+    ];
 
-	const allTransactions = [];
+    const allTransactions = [];
 
-	for (const transactionEndpoint of transactionEndpoints) {
-		const {
-			allTransactions: transactions,
-			addressTransactionCounts: transactionCounts
-		} = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi);
+    for (const transactionEndpoint of transactionEndpoints) {
+        const { allTransactions: transactions, addressTransactionCounts: transactionCounts } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi);
 
-		allTransactions.push(...transactions);
-		await new Promise(resolve => setTimeout(resolve, 1000));
-	}
+        allTransactions.push(...transactions);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
 
-	return allTransactions;
+    return allTransactions;
 }
 
 function displayAllTransactions(addressTransactionCounts, allTransactions) {
-	displayTransactionSummary(addressTransactionCounts, allTransactions.length);
-	displayTransactionTable(allTransactions);
+    displayTransactionSummary(addressTransactionCounts, allTransactions.length);
+    displayTransactionTable(allTransactions);
 }
 
+async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi) {
+  const allTransactions = [];
+
+  for (const singleAddress of addresses) {
+    const transactions = await fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi);
+    allTransactions.push(...transactions);
+    addressTransactionCounts[singleAddress] += transactions.length;
+  }
+
+  return {
+    allTransactions,
+    addressTransactionCounts
+  };
+}
+
+async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi) {
+  const records = await transactionFetchFunction(singleAddress, singleTransactionType, etherscanApi);
+  const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
+  const transactionMapper = tx => ({
+    ...tx,
+    type
+  });
+
+  return records.map(transactionMapper);
+}
 
 
 async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
-	try {
-		const records = await etherscanApi.fetchTransactionData({
-			singleTransactionType,
-			singleAddress
-		});
-		const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
-		const transactionMapper = tx => ({
-			...tx,
-			type
-		});
+  try {
+    const records = await etherscanApi.fetchTransactionData({
+      singleTransactionType,
+      singleAddress
+    });
 
-		return {
-			transactions: records.map(transactionMapper),
-			transactionCount: records.length,
-		};
-	} catch (error) {
-		console.error("Error fetching transactions and transfers:", error);
-		return {
-			transactions: [],
-			transactionCount: 0,
-		};
-	}
+    return records;
+  } catch (error) {
+    console.error("Error fetching transactions and transfers:", error);
+    return [];
+  }
 }
+
 
 
 function displayTransactionSummary(addressTransactionCounts, totalCount) {
@@ -302,10 +300,6 @@ function getTransactionTokenSymbol(tx) {
 	} else if (['erc721', 'erc1155'].includes(tx.type)) {
 		return `${tx.tokenSymbol}-${tx.tokenID}`;
 	}
-} <
-/script>
-
-
-
-  </body>
+} 
+</script>
 </html>
