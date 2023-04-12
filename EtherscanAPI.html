@@ -39,9 +39,9 @@
 
 <script>
 
-    document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
-    });
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
+});
 
 
 class EtherscanApi {
@@ -65,15 +65,17 @@ class EtherscanApi {
         return data;
     }
 
+
     async fetchTransactionData({
         singleTransactionType,
+        buildURLFunction,
         singleAddress,
         page = 1,
         retries = 20,
         delay = 500
     }) {
         this.apiCallCount++;
-        const url = this.buildURL(singleTransactionType, singleAddress, page);
+        const url = buildURLFunction(singleAddress, page);
         try {
             const response = await fetch(url);
             const data = await response.json();
@@ -82,7 +84,8 @@ class EtherscanApi {
                 console.warn("Max rate limit reached. Retrying...");
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return await this.fetchTransactionData({
-                    singleTransactionType,
+                    singleTransactionType: singleTransactionType,
+                    buildURLFunction,
                     singleAddress,
                     page,
                     retries: retries - 1,
@@ -103,9 +106,31 @@ class EtherscanApi {
 
 
 
-    buildURL(singleTransactionType, singleAddress, page) {
+    buildTxlistURL(singleAddress, page) {
+        return this.buildBaseURL('txlist', singleAddress, page);
+    }
+
+    buildTxlistInternalURL(singleAddress, page) {
+        return this.buildBaseURL('txlistinternal', singleAddress, page);
+    }
+
+    buildTokenTxURL(singleAddress, page) {
+        return this.buildBaseURL('tokentx', singleAddress, page);
+    }
+
+    buildTokenNftTxURL(singleAddress, page) {
+        return this.buildBaseURL('tokennfttx', singleAddress, page);
+    }
+
+    buildToken1155TxURL(singleAddress, page) {
+        return this.buildBaseURL('token1155tx', singleAddress, page);
+    }
+
+    buildBaseURL(singleTransactionType, singleAddress, page) {
         return `${this.baseUrl}?module=account&action=${singleTransactionType}&address=${singleAddress}&startblock=0&endblock=latest&page=${page}&offset=10000&sort=asc&apikey=${this.apiKey}`;
     }
+
+
 }
 
 async function fetchAndDisplayTransactions() {
@@ -167,25 +192,31 @@ function calculateConcurrency(addressesCount, transactionTypesCount, concurrency
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
     const transactionEndpoints = [{
             singleTransactionType: 'txlist',
+            buildURLFunction: etherscanApi.buildTxlistURL.bind(etherscanApi),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'txlistinternal',
+            buildURLFunction: etherscanApi.buildTxlistInternalURL.bind(etherscanApi),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'tokentx',
+            buildURLFunction: etherscanApi.buildTokenTxURL.bind(etherscanApi),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'tokennfttx',
+            buildURLFunction: etherscanApi.buildTokenNftTxURL.bind(etherscanApi),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'token1155tx',
+            buildURLFunction: etherscanApi.buildToken1155TxURL.bind(etherscanApi),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
     ];
+
 
     const allTransactions = [];
 
@@ -211,7 +242,7 @@ async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addr
     const {
         allTransactions: transactions,
         addressTransactionCounts: transactionCounts
-    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi);
+    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi, transactionEndpoint.buildURLFunction);
 
     return {
         transactions,
@@ -221,11 +252,12 @@ async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addr
 
 
 
-async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi) {
+
+async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi, buildURLFunction) {
     const allTransactions = [];
 
     for (const singleAddress of addresses) {
-        const transactions = await fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi);
+        const transactions = await fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi, buildURLFunction);
         allTransactions.push(...transactions);
         addressTransactionCounts[singleAddress] += transactions.length;
     }
@@ -237,8 +269,9 @@ async function fetchTransactionsForAllAddresses(transactionFetchFunction, addres
 }
 
 
-async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi) {
-    const records = await transactionFetchFunction(singleAddress, singleTransactionType, etherscanApi);
+
+async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi, buildURLFunction) {
+    const records = await transactionFetchFunction(singleAddress, singleTransactionType, etherscanApi, buildURLFunction);
     const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
     const transactionMapper = tx => ({
         ...tx,
@@ -249,10 +282,11 @@ async function fetchTransactionsForAddress(transactionFetchFunction, singleAddre
 }
 
 
-async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
+
+async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi, buildURLFunction) {
     try {
         const records = await etherscanApi.fetchTransactionDataWithPagination({
-            singleTransactionType,
+            buildURLFunction,
             singleAddress
         });
 
@@ -262,6 +296,7 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
         return [];
     }
 }
+
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
     displayTransactionSummary(addressTransactionCounts, allTransactions.length);
@@ -376,6 +411,6 @@ function getTransactionTokenSymbol(tx) {
     } else if (['erc721', 'erc1155'].includes(tx.type)) {
         return `${tx.tokenSymbol}-${tx.tokenID}`;
     }
-} 
+}
 </script>
 </html>
