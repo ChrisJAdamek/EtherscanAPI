@@ -26,9 +26,14 @@
   </head>
 <body>
   <h1>Etherscan API</h1>
-  <label for="api-key">Enter your Etherscan API Key:</label>
-  <input type="text" id="api-key" placeholder="Your API Key">
-  <br>
+ <div>
+  <label for="etherscan-api-key">Enter your Etherscan API Key:</label>
+  <input type="text" id="etherscan-api-key" placeholder="Your Etherscan API Key">
+ </div>
+ <div>
+  <label for="arbiscan-api-key">Enter your Arbiscan API Key:</label>
+  <input type="text" id="arbiscan-api-key" placeholder="Your Arbiscan API Key">
+ </div>
   <label for="singleAddress">Enter Ethereum addresses (comma-separated):</label>
   <input type="text" id="singleAddress" placeholder="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae, 0x742d35Cc6634C0532925a3b844Bc454e4438f44e">
   <button id="fetchAndDisplayTransactions">Fetch and Display Transactions</button>
@@ -43,11 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
 });
 
-
-class EtherscanApi {
-    constructor(apiKey) {
+class BlockchainAPI {
+    constructor(apiKey, baseUrl) {
         this.apiKey = apiKey;
-        this.baseUrl = "https://api.etherscan.io/api";
+        this.baseUrl = baseUrl;
         this.apiCallCount = 0;
         this.startTime = Date.now();
     }
@@ -67,42 +71,42 @@ class EtherscanApi {
 
 
     async fetchTransactionData({
-        singleTransactionType,
-        buildURLFunction,
-        singleAddress,
-        page = 1,
-        retries = 20,
-        delay = 500
-    }) {
-        this.apiCallCount++;
-        const url = buildURLFunction(singleAddress, page);
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
+    singleTransactionType,
+    buildURLFunction,
+    singleAddress,
+    page = 1,
+    retries = 20,
+    delay = 500
+}) {
+    this.apiCallCount++;
+    const url = buildURLFunction(singleAddress, page);
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
 
-            if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-                console.warn("Max rate limit reached. Retrying...");
-                await new Promise(resolve => setTimeout(resolve, delay));
-                return await this.fetchTransactionData({
-                    singleTransactionType: singleTransactionType,
-                    buildURLFunction,
-                    singleAddress,
-                    page,
-                    retries: retries - 1,
-                    delay: delay * 2
-                });
-            }
-            if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
-                const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
-                console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
-            }
-
-            return data.result;
-        } catch (error) {
-            console.error("Error fetching data:", error);
-            return [];
+        if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+            console.warn("Max rate limit reached. Retrying...");
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return await this.fetchTransactionData({
+                singleTransactionType: singleTransactionType,
+                buildURLFunction,
+                singleAddress,
+                page,
+                retries: retries - 1,
+                delay: delay * 2
+            });
         }
+        if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
+            const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+            console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
+        }
+
+        return Array.isArray(data.result) ? data.result : [];
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        return [];
     }
+}
 
 
 
@@ -133,17 +137,32 @@ class EtherscanApi {
 
 }
 
+class EtherscanAPI extends BlockchainAPI {
+    constructor(apiKey) {
+        super(apiKey, "https://api.etherscan.io/api");
+    }
+}
+
+class ArbiscanAPI extends BlockchainAPI {
+    constructor(apiKey) {
+        super(apiKey, "https://api.arbiscan.io/api");
+    }
+}
+
+
 async function fetchAndDisplayTransactions() {
-    const etherscanApi = createEtherscanApi();
+    const [etherscanApi, arbiscanApi] = createBlockchainAPIs();
     const addresses = getInputAddresses();
 
     const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
+    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, [etherscanApi, arbiscanApi]);
     displayTransactions(addressTransactionCounts, allTransactions);
 }
 
-function createEtherscanApi() {
-    return new EtherscanApi(document.getElementById('api-key').value);
+function createBlockchainAPIs() {
+    const etherscanApi = new EtherscanAPI(document.getElementById('etherscan-api-key').value);
+    const arbiscanApi = new ArbiscanAPI(document.getElementById('arbiscan-api-key').value);
+    return [etherscanApi, arbiscanApi];
 }
 
 function getInputAddresses() {
@@ -189,60 +208,58 @@ function calculateConcurrency(addressesCount, transactionTypesCount, concurrency
 }
 
 
-async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
+async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
     const transactionEndpoints = [{
-            singleTransactionType: 'txlist',
-            buildURLFunction: etherscanApi.buildTxlistURL.bind(etherscanApi),
-            transactionFetchFunction: fetchSingleAddressTransactions
-        },
+        singleTransactionType: 'txlist',
+        buildURLFunction: api => api.buildTxlistURL.bind(api),
+        transactionFetchFunction: fetchSingleAddressTransactions
+    },
         {
             singleTransactionType: 'txlistinternal',
-            buildURLFunction: etherscanApi.buildTxlistInternalURL.bind(etherscanApi),
+            buildURLFunction: api => api.buildTxlistInternalURL.bind(api),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'tokentx',
-            buildURLFunction: etherscanApi.buildTokenTxURL.bind(etherscanApi),
+            buildURLFunction: api => api.buildTokenTxURL.bind(api),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'tokennfttx',
-            buildURLFunction: etherscanApi.buildTokenNftTxURL.bind(etherscanApi),
+            buildURLFunction: api => api.buildTokenNftTxURL.bind(api),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
         {
             singleTransactionType: 'token1155tx',
-            buildURLFunction: etherscanApi.buildToken1155TxURL.bind(etherscanApi),
+            buildURLFunction: api => api.buildToken1155TxURL.bind(api),
             transactionFetchFunction: fetchSingleAddressTransactions
         },
     ];
 
 
-    const allTransactions = [];
+const allTransactions = [];
 
-    // Calculate the dynamic concurrency
     const addressesCount = addresses.length;
     const transactionTypesCount = transactionEndpoints.length;
     const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
 
-    await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
-        const {
-            transactions,
-            transactionCounts
-        } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi);
-        allTransactions.push(...transactions);
-    }), concurrency);
+    for (const api of apis) {
+        await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
+            const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api);
+            allTransactions.push(...transactions);
+        }), concurrency);
+    }
 
     return allTransactions;
 }
 
 
 
-async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi) {
+async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api) {
     const {
         allTransactions: transactions,
         addressTransactionCounts: transactionCounts
-    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi, transactionEndpoint.buildURLFunction);
+    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
 
     return {
         transactions,
@@ -253,11 +270,11 @@ async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addr
 
 
 
-async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi, buildURLFunction) {
+async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, api, buildURLFunction) {
     const allTransactions = [];
 
     for (const singleAddress of addresses) {
-        const transactions = await fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi, buildURLFunction);
+        const transactions = await fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction);
         allTransactions.push(...transactions);
         addressTransactionCounts[singleAddress] += transactions.length;
     }
@@ -270,8 +287,8 @@ async function fetchTransactionsForAllAddresses(transactionFetchFunction, addres
 
 
 
-async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, etherscanApi, buildURLFunction) {
-    const records = await transactionFetchFunction(singleAddress, singleTransactionType, etherscanApi, buildURLFunction);
+async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction) {
+    const records = await transactionFetchFunction(singleAddress, singleTransactionType, api, buildURLFunction);
     const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
     const transactionMapper = tx => ({
         ...tx,
@@ -283,11 +300,15 @@ async function fetchTransactionsForAddress(transactionFetchFunction, singleAddre
 
 
 
-async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi, buildURLFunction) {
+async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, api, buildURLFunction) {
     try {
-        const records = await etherscanApi.fetchTransactionDataWithPagination({
-            buildURLFunction,
-            singleAddress
+        const records = await api.fetchTransactionDataWithPagination({
+            singleTransactionType: singleTransactionType,
+            buildURLFunction: buildURLFunction(api),
+            singleAddress,
+            page: 1,
+            retries: 20,
+            delay: 500
         });
 
         return records;
@@ -296,6 +317,8 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
         return [];
     }
 }
+
+
 
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
