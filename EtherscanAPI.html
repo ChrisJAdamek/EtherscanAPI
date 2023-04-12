@@ -69,8 +69,8 @@ async fetchTransactionData({
   singleTransactionType,
   singleAddress,
   page = 1,
-  retries = 3,
-  delay = 1000
+  retries = 20,
+  delay = 500
 }) {
   this.apiCallCount++;
   const url = this.buildURL(singleTransactionType, singleAddress, page);
@@ -89,7 +89,7 @@ async fetchTransactionData({
                 delay: delay * 2
             });
         }
-  if (this.apiCallCount % 10 === 0) { // Log every 10 calls or choose your preferred frequency
+  if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
     const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
     console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
   }
@@ -155,6 +155,14 @@ async function promiseAllWithConcurrency(promises, concurrency) {
   return Promise.all(results);
 }
 
+function calculateConcurrency(addressesCount, transactionTypesCount, concurrencyPercentage = 0.1) {
+  const totalTasks = addressesCount * transactionTypesCount;
+  const concurrency = Math.ceil(totalTasks * concurrencyPercentage);
+
+  // Ensure concurrency is at least 1 to prevent blocking the execution
+  return Math.max(1, concurrency);
+}
+
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
   const transactionEndpoints = [
     { singleTransactionType: 'txlist', transactionFetchFunction: fetchSingleAddressTransactions },
@@ -166,8 +174,11 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, ethersc
 
   const allTransactions = [];
 
-  // Adjust concurrency as needed or make it dynamic
-  const concurrency = Math.min(3, addresses.length);
+  // Calculate the dynamic concurrency
+  const addressesCount = addresses.length;
+  const transactionTypesCount = transactionEndpoints.length;
+  const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
+
   await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
     const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi);
     allTransactions.push(...transactions);
@@ -175,6 +186,7 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, ethersc
 
   return allTransactions;
 }
+
 
 
 async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi) {
@@ -294,13 +306,6 @@ function createTransactionTableHeader() {
 }
 
 function createTransactionTableBody(transactions) {
-    return transactions.map(tx => createEachTransactionTableRow(tx)).join('');
-}
-
-
-
-
-function createTransactionTableRows(transactions) {
     return transactions.map(tx => createEachTransactionTableRow(tx)).join('');
 }
 
