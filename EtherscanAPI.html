@@ -42,6 +42,19 @@
 		document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
 	});
 
+	async function fetchAndDisplayTransactions() {
+	    const etherscanApi = createEtherscanApi(); 
+	    const addresses = getInputAddresses(); 
+
+	    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
+	    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
+	    displayTransactions(addressTransactionCounts, allTransactions);
+	}
+	
+function createEtherscanApi() {
+ return new EtherscanApi(document.getElementById('api-key').value);
+}	
+
 class EtherscanApi {
 	constructor(apiKey) {
 		this.apiKey = apiKey;
@@ -102,24 +115,21 @@ function initializeAddressTransactionCounts(addresses) {
 	return addressTransactionCounts;
 }
 
-	async function fetchAndDisplayTransactions() {
-	    const etherscanApi = createEtherscanApi(); 
-	    const addresses = getInputAddresses(); 
-
-	    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-	    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
-	    displayTransactions(addressTransactionCounts, allTransactions);
-	}
-
-    function createEtherscanApi() {
-        return new EtherscanApi(document.getElementById('api-key').value);
-    }
-
-
     function getInputAddresses() {
         const inputAddresses = document.getElementById('singleAddress').value;
         return inputAddresses.split(',').map(a => a.trim());
     }
+
+async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi) {
+    const { allTransactions: transactions, addressTransactionCounts: transactionCounts } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi);
+
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    return {
+        transactions,
+        transactionCounts
+    };
+}
 
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
     const transactionEndpoints = [
@@ -132,22 +142,16 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, ethersc
 
     const allTransactions = [];
 
-    for (const transactionEndpoint of transactionEndpoints) {
-        const { allTransactions: transactions, addressTransactionCounts: transactionCounts } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, etherscanApi);
+    for await (const transactionEndpoint of transactionEndpoints) {
+        const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi);
 
         allTransactions.push(...transactions);
-        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     return allTransactions;
 }
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
-    displayTransactionSummary(addressTransactionCounts, allTransactions.length);
-    displayTransactionTable(allTransactions);
-}
-
-function displayAllTransactions(addressTransactionCounts, allTransactions) {
     displayTransactionSummary(addressTransactionCounts, allTransactions.length);
     displayTransactionTable(allTransactions);
 }
@@ -218,34 +222,38 @@ function displayTransactionTable(transactions) {
 	resultsDiv.appendChild(table);
 }
 
-function createTransactionTable(transactions) {
-	const table = document.createElement('table');
-	const headers = createTransactionTableHeaders();
-	const rows = createTransactionTableRows(transactions);
-
-	table.innerHTML = headers + rows;
-	return table;
+function createTransactionTableHeader() {
+  return `
+    <tr>
+      <th>Type</th>
+      <th>Timestamp</th>
+      <th>TX Hash</th>
+      <th>Function</th>
+      <th>Value</th>
+      <th>Token Symbol</th>
+      <th>From</th>
+      <th>To</th>
+      <th>Contract Address</th>
+      <th>TokenID</th>
+      <th>TX Fee (ETH)</th>
+      <th>Token Name</th>
+      <th>Gas Price (Gwei)</th>
+      <th>TX Failed</th>
+    </tr>
+  `;
 }
 
-function createTransactionTableHeaders() {
-	return `
-		<tr>
-		    <th>Type</th>
-		    <th>Timestamp</th>
-		    <th>TX Hash</th>
-		    <th>Function</th>
-		    <th>Value</th>
-		    <th>Token Symbol</th>
-		    <th>From</th>
-		    <th>To</th>
-		    <th>Contract Address</th>
-		    <th>TokenID</th>
-		    <th>TX Fee (ETH)</th>
-		    <th>Token Name</th>
-		    <th>Gas Price (Gwei)</th>
-		    <th>TX Failed</th>
-		</tr>
-	    `;
+function createTransactionTableBody(transactions) {
+  return transactions.map(tx => createEachTransactionTableRow(tx)).join('');
+}
+
+function createTransactionTable(transactions) {
+  const table = document.createElement('table');
+  const header = createTransactionTableHeader();
+  const body = createTransactionTableBody(transactions);
+
+  table.innerHTML = header + body;
+  return table;
 }
 
 
