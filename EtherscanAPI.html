@@ -38,19 +38,19 @@
 </body>
 
 <script>
-  
+
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
     });
 
 
 class EtherscanApi {
-  constructor(apiKey) {
-    this.apiKey = apiKey;
-    this.baseUrl = "https://api.etherscan.io/api";
-    this.apiCallCount = 0;
-    this.startTime = Date.now();
-  }
+    constructor(apiKey) {
+        this.apiKey = apiKey;
+        this.baseUrl = "https://api.etherscan.io/api";
+        this.apiCallCount = 0;
+        this.startTime = Date.now();
+    }
 
     async fetchTransactionDataWithPagination(args) {
         const data = await this.fetchTransactionData(args);
@@ -65,41 +65,41 @@ class EtherscanApi {
         return data;
     }
 
-async fetchTransactionData({
-  singleTransactionType,
-  singleAddress,
-  page = 1,
-  retries = 20,
-  delay = 500
-}) {
-  this.apiCallCount++;
-  const url = this.buildURL(singleTransactionType, singleAddress, page);
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
+    async fetchTransactionData({
+        singleTransactionType,
+        singleAddress,
+        page = 1,
+        retries = 20,
+        delay = 500
+    }) {
+        this.apiCallCount++;
+        const url = this.buildURL(singleTransactionType, singleAddress, page);
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
 
-        if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-            console.warn("Max rate limit reached. Retrying...");
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return await this.fetchTransactionData({
-                singleTransactionType,
-                singleAddress,
-                page,
-                retries: retries - 1,
-                delay: delay * 2
-            });
+            if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+                console.warn("Max rate limit reached. Retrying...");
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return await this.fetchTransactionData({
+                    singleTransactionType,
+                    singleAddress,
+                    page,
+                    retries: retries - 1,
+                    delay: delay * 2
+                });
+            }
+            if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
+                const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+                console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
+            }
+
+            return data.result;
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            return [];
         }
-  if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
-    const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
-    console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
-  }
-
-  return data.result;
-    } catch (error) {
-        console.error("Error fetching data:", error);
-        return [];
     }
-}
 
 
 
@@ -136,55 +136,73 @@ function initializeAddressTransactionCounts(addresses) {
 
 
 async function promiseAllWithConcurrency(promises, concurrency) {
-  const results = [];
-  const executing = [];
+    const results = [];
+    const executing = [];
 
-  for (const promise of promises) {
-    const p = promise();
-    results.push(p);
+    for (const promise of promises) {
+        const p = promise();
+        results.push(p);
 
-    if (concurrency <= promises.length) {
-      const e = p.then(() => executing.splice(executing.indexOf(e), 1));
-      executing.push(e);
-      if (executing.length >= concurrency) {
-        await Promise.race(executing);
-      }
+        if (concurrency <= promises.length) {
+            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+            executing.push(e);
+            if (executing.length >= concurrency) {
+                await Promise.race(executing);
+            }
+        }
     }
-  }
 
-  return Promise.all(results);
+    return Promise.all(results);
 }
 
 function calculateConcurrency(addressesCount, transactionTypesCount, concurrencyPercentage = 0.1) {
-  const totalTasks = addressesCount * transactionTypesCount;
-  const concurrency = Math.ceil(totalTasks * concurrencyPercentage);
+    const totalTasks = addressesCount * transactionTypesCount;
+    const concurrency = Math.ceil(totalTasks * concurrencyPercentage);
 
-  // Ensure concurrency is at least 1 to prevent blocking the execution
-  return Math.max(1, concurrency);
+    // Ensure concurrency is at least 1 to prevent blocking the execution
+    return Math.max(1, concurrency);
 }
 
+
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
-  const transactionEndpoints = [
-    { singleTransactionType: 'txlist', transactionFetchFunction: fetchSingleAddressTransactions },
-    { singleTransactionType: 'txlistinternal', transactionFetchFunction: fetchSingleAddressTransactions },
-    { singleTransactionType: 'tokentx', transactionFetchFunction: fetchSingleAddressTransactions },
-    { singleTransactionType: 'tokennfttx', transactionFetchFunction: fetchSingleAddressTransactions },
-    { singleTransactionType: 'token1155tx', transactionFetchFunction: fetchSingleAddressTransactions },
-  ];
+    const transactionEndpoints = [{
+            singleTransactionType: 'txlist',
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
+        {
+            singleTransactionType: 'txlistinternal',
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
+        {
+            singleTransactionType: 'tokentx',
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
+        {
+            singleTransactionType: 'tokennfttx',
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
+        {
+            singleTransactionType: 'token1155tx',
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
+    ];
 
-  const allTransactions = [];
+    const allTransactions = [];
 
-  // Calculate the dynamic concurrency
-  const addressesCount = addresses.length;
-  const transactionTypesCount = transactionEndpoints.length;
-  const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
+    // Calculate the dynamic concurrency
+    const addressesCount = addresses.length;
+    const transactionTypesCount = transactionEndpoints.length;
+    const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
 
-  await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
-    const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi);
-    allTransactions.push(...transactions);
-  }), concurrency);
+    await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
+        const {
+            transactions,
+            transactionCounts
+        } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, etherscanApi);
+        allTransactions.push(...transactions);
+    }), concurrency);
 
-  return allTransactions;
+    return allTransactions;
 }
 
 
