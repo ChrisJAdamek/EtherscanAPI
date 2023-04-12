@@ -48,63 +48,52 @@ class EtherscanApi {
 		this.baseUrl = "https://api.etherscan.io/api";
 	}
 
+	async fetchTransactionDataWithPagination(args) {
+	  const data = await this.fetchTransactionData(args);
+	  if (data.length === 10000) {
+	    console.log("Fetching next page...");
+	    const nextPageData = await this.fetchTransactionDataWithPagination({
+	      ...args,
+	      page: args.page + 1,
+	    });
+	    return data.concat(nextPageData);
+	  }
+	  return data;
+	}
+
 	async fetchTransactionData({
+	  singleTransactionType,
+	  singleAddress,
+	  page = 1,
+	  retries = 3
+	}) {
+	  const url = this.buildURL(singleTransactionType, singleAddress, page);
+	  try {
+	    const response = await fetch(url);
+	    const data = await response.json();
+
+	    if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+	      console.warn("Max rate limit reached. Retrying...");
+	      await new Promise(resolve => setTimeout(resolve, 1000));
+	      return await this.fetchTransactionData({
 		singleTransactionType,
 		singleAddress,
-		page = 1,
-		retries = 3
-	}) {
-		const url = this.buildURL(singleTransactionType, singleAddress, page);
-		try {
-			const response = await fetch(url);
-			const data = await response.json();
+		page,
+		retries: retries - 1
+	      });
+	    }
 
-			if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-				console.warn("Max rate limit reached. Retrying...");
-				await new Promise(resolve => setTimeout(resolve, 1000));
-				return await this.fetchTransactionData({
-					singleTransactionType,
-					singleAddress,
-					page,
-					retries: retries - 1
-				});
-			}
-
-			if (data.result.length === 10000) {
-				console.log("Fetching next page...");
-				const nextPageData = await this.fetchTransactionData(singleTransactionType, singleAddress, page + 1);
-				return data.result.concat(nextPageData);
-			}
-
-			return data.result;
-		} catch (error) {
-			console.error("Error fetching data:", error);
-			return [];
-		}
+	    return data.result;
+	  } catch (error) {
+	    console.error("Error fetching data:", error);
+	    return [];
+	  }
 	}
+
 
 	buildURL(singleTransactionType, singleAddress, page) {
 		return `${this.baseUrl}?module=account&action=${singleTransactionType}&address=${singleAddress}&startblock=0&endblock=latest&page=${page}&offset=10000&sort=asc&apikey=${this.apiKey}`;
 	}
-}
-
-async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, etherscanApi) {
-	const promises = addresses.map(async (singleAddress, index) => {
-		await new Promise(resolve => setTimeout(resolve, index * 400));
-		// Pass etherscanApi as the last parameter
-		return transactionFetchFunction(singleAddress, singleTransactionType, etherscanApi);
-	});
-	return Promise.all(promises).then(results => {
-		const allTransactions = results.flatMap(r => r.transactions);
-		results.forEach((curr, index) => {
-			addressTransactionCounts[addresses[index]] += curr.transactionCount;
-		});
-
-		return {
-			allTransactions,
-			addressTransactionCounts
-		};
-	});
 }
 
 function initializeAddressTransactionCounts(addresses) {
@@ -113,15 +102,24 @@ function initializeAddressTransactionCounts(addresses) {
 	return addressTransactionCounts;
 }
 
-async function fetchAndDisplayTransactions() {
-    const etherscanApi = new EtherscanApi(document.getElementById('api-key').value);
-    const inputAddresses = document.getElementById('singleAddress').value;
-    const addresses = inputAddresses.split(',').map(a => a.trim());
+    async function fetchAndDisplayTransactions() {
+        const etherscanApi = createEtherscanApi(); 
+        const addresses = getInputAddresses(); 
 
-    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
-    displayAllTransactions(addressTransactionCounts, allTransactions);
-}
+        const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
+        const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
+        displayAllTransactions(addressTransactionCounts, allTransactions);
+    }
+
+    function createEtherscanApi() {
+        return new EtherscanApi(document.getElementById('api-key').value);
+    }
+
+
+    function getInputAddresses() {
+        const inputAddresses = document.getElementById('singleAddress').value;
+        return inputAddresses.split(',').map(a => a.trim());
+    }
 
 async function fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi) {
     const transactionEndpoints = [
@@ -178,7 +176,7 @@ async function fetchTransactionsForAddress(transactionFetchFunction, singleAddre
 
 async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, etherscanApi) {
   try {
-    const records = await etherscanApi.fetchTransactionData({
+    const records = await etherscanApi.fetchTransactionDataWithPagination({
       singleTransactionType,
       singleAddress
     });
@@ -189,6 +187,7 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
     return [];
   }
 }
+
 
 
 
