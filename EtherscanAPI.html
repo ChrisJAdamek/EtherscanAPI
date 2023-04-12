@@ -102,14 +102,14 @@ function initializeAddressTransactionCounts(addresses) {
 	return addressTransactionCounts;
 }
 
-    async function fetchAndDisplayTransactions() {
-        const etherscanApi = createEtherscanApi(); 
-        const addresses = getInputAddresses(); 
+	async function fetchAndDisplayTransactions() {
+	    const etherscanApi = createEtherscanApi(); 
+	    const addresses = getInputAddresses(); 
 
-        const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-        const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
-        displayAllTransactions(addressTransactionCounts, allTransactions);
-    }
+	    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
+	    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, etherscanApi);
+	    displayTransactions(addressTransactionCounts, allTransactions);
+	}
 
     function createEtherscanApi() {
         return new EtherscanApi(document.getElementById('api-key').value);
@@ -140,6 +140,11 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, ethersc
     }
 
     return allTransactions;
+}
+
+function displayTransactions(addressTransactionCounts, allTransactions) {
+    displayTransactionSummary(addressTransactionCounts, allTransactions.length);
+    displayTransactionTable(allTransactions);
 }
 
 function displayAllTransactions(addressTransactionCounts, allTransactions) {
