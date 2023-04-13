@@ -16,7 +16,7 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 2000px;
             margin: 0 auto;
             padding: 30px;
         }
@@ -564,9 +564,9 @@ function createTransactionTableHeader() {
       <th>Contract Address</th>
       <th>TokenID</th>
       <th>TX Fee (ETH)</th>
-      <th>Token Name</th>
-      <th>Gas Price (Gwei)</th>
-      <th>TX Failed</th>
+      <!--<th>Token Name</th>-->
+      <!--<th>Gas Price (Gwei)</th>-->
+      <!--th>TX Failed</th>-->
     </tr>
   `;
 }
@@ -594,9 +594,9 @@ function createEachTransactionTableRow(tx) {
 		    <td>${tx.contractAddress}</td>
 		    <td>${tx.tokenID ?? 'N/A'}</td>
 		    <td>${transactionFee}</td>
-		    <td>${tx.tokenName || 'N/A'}</td>
-		    <td>${(parseInt(tx.gasPrice) / 1e9).toFixed(6)}</td>
-		    <td>${tx.isError === '1' ? 'Yes' : 'No'}</td>
+		    <!--<td>${tx.tokenName || 'N/A'}</td>-->
+		    <!--<td>${(parseInt(tx.gasPrice) / 1e9).toFixed(6)}</td>-->
+		    <!-- <td>${tx.isError === '1' ? 'Yes' : 'No'}</td>-->
 		</tr>
 	    `;
 }
