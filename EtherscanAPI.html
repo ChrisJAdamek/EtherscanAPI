@@ -203,8 +203,12 @@
 <script>
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
+    setupEventListeners();
 });
+
+function setupEventListeners() {
+    document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
+}
 
 class BlockchainAPI {
     constructor(apiKey, baseUrl) {
@@ -212,61 +216,89 @@ class BlockchainAPI {
         this.baseUrl = baseUrl;
         this.apiCallCount = 0;
         this.startTime = Date.now();
+        this.tokens = 3;
+        this.maxTokens = 3;
+        this.tokenRate = 1 / 3;
+        this.addTokens();
     }
 
-async fetchTransactionDataWithPagination(args) { 
-    const data = await this.fetchTransactionData(args);
-    if (data.length === 10000) {
-        console.log("Fetching next page...");
-        const nextPageData = await this.fetchTransactionDataWithPagination({
-            ...args,
-            page: args.page + 1,
-        }); 
-        return data.concat(nextPageData);
+    addTokens() {
+        if (this.tokens < this.maxTokens) {
+            this.tokens += 1;
+        }
+        setTimeout(() => this.addTokens(), this.tokenRate * 1000);
     }
-    return data;
-}
 
+    async waitForToken() {
+        return new Promise((resolve) => {
+            const tryConsumeToken = () => {
+                if (this.tokens > 0) {
+                    this.tokens -= 1;
+                    resolve();
+                } else {
+                    setTimeout(tryConsumeToken, this.tokenRate * 1000);
+                }
+            };
+            tryConsumeToken();
+        });
+    }
 
-    async fetchTransactionData({
-    singleTransactionType,
-    buildURLFunction,
-    singleAddress,
-    page = 1,
-    retries = 20,
-    delay = 500
-}) {
-    this.apiCallCount++;
-    const url = buildURLFunction(singleAddress, page);
-    try {
-        const response = await fetch(url);
-        const data = await response.json();
+    async fetchTransactionData(args) {
+        await this.waitForToken();
+        return this.fetchTransactionDataWithPagination(args);
+    }
 
-        if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-            console.warn("Max rate limit reached. Retrying...");
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return await this.fetchTransactionData({
-                singleTransactionType: singleTransactionType,
-                buildURLFunction,
-                singleAddress,
-                page,
-                retries: retries - 1,
-                delay: delay * 2
+    async fetchTransactionDataWithPagination(args) {
+        const data = await this.fetchTransactionDataCore(args);
+        if (data.length === 10000) {
+            console.log("Fetching next page...");
+            const nextPageData = await this.fetchTransactionDataWithPagination({
+                ...args,
+                page: args.page + 1,
             });
+            return data.concat(nextPageData);
         }
-        if (this.apiCallCount % 1 === 0) { // Log every 10 calls or choose your preferred frequency
-            const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
-            console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
-        }
-
-        return Array.isArray(data.result) ? data.result : [];
-    } catch (error) {
-        console.error("Error fetching data:", error);
-        return [];
+        return data;
     }
-}
 
+    // Renamed function to avoid confusion and fixed function parameters
+    async fetchTransactionDataCore({
+        singleTransactionType,
+        buildURLFunction,
+        singleAddress,
+        page = 1,
+        retries = 20,
+        delay = 500
+    }) {
+        this.apiCallCount++;
+        const url = buildURLFunction(singleAddress, page);
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
 
+            if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
+                console.warn("Max rate limit reached. Retrying...");
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return await this.fetchTransactionDataCore({
+                    singleTransactionType,
+                    buildURLFunction,
+                    singleAddress,
+                    page,
+                    retries: retries - 1,
+                    delay: delay * 2
+                });
+            }
+            if (this.apiCallCount % 1 === 0) { // Log every call or choose your preferred frequency
+                const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+                console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
+            }
+
+            return Array.isArray(data.result) ? data.result : [];
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            return [];
+        }
+    }
 
     buildTxlistURL(singleAddress, page) {
         return this.buildBaseURL('txlist', singleAddress, page);
@@ -291,8 +323,6 @@ async fetchTransactionDataWithPagination(args) {
     buildBaseURL(singleTransactionType, singleAddress, page) {
         return `${this.baseUrl}?module=account&action=${singleTransactionType}&address=${singleAddress}&startblock=0&endblock=latest&page=${page}&offset=10000&sort=asc&apikey=${this.apiKey}`;
     }
-
-
 }
 
 class EtherscanAPI extends BlockchainAPI {
@@ -306,6 +336,7 @@ class ArbiscanAPI extends BlockchainAPI {
         super(apiKey, "https://api.arbiscan.io/api");
     }
 }
+
 
 
 async function fetchAndDisplayTransactions() {
@@ -331,16 +362,16 @@ function createBlockchainAPIs() {
         if (etherscanApi) { // New check
             apis.push(etherscanApi);
         } else {
-            console.error("Etherscan API object is undefined"); 
+            console.error("Etherscan API object is undefined");
         }
     }
 
     if (arbiscanApiKey) {
         const arbiscanApi = new ArbiscanAPI(arbiscanApiKey);
-        if (arbiscanApi) { 
+        if (arbiscanApi) {
             apis.push(arbiscanApi);
         } else {
-            console.error("Arbiscan API object is undefined"); 
+            console.error("Arbiscan API object is undefined");
         }
     }
 
@@ -398,8 +429,7 @@ function calculateConcurrency(addressesCount, transactionTypesCount, concurrency
 
 
 async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
-    const transactionEndpoints = [
-        {
+    const transactionEndpoints = [{
             singleTransactionType: 'txlist',
             buildURLFunction: api => api.buildTxlistURL.bind(api),
             transactionFetchFunction: fetchSingleAddressTransactions
@@ -431,8 +461,14 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
     const uniqueCombinations = generateUniqueCombinations(apis, transactionEndpoints);
     const concurrency = calculateConcurrency(addresses.length, transactionEndpoints.length);
 
-    await promiseAllWithConcurrency(uniqueCombinations.map(({ api, transactionEndpoint }) => async () => {
-        const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
+    await promiseAllWithConcurrency(uniqueCombinations.map(({
+        api,
+        transactionEndpoint
+    }) => async () => {
+        const {
+            transactions,
+            transactionCounts
+        } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
         allTransactions.push(...transactions);
     }), concurrency);
 
@@ -444,7 +480,10 @@ function generateUniqueCombinations(apis, transactionEndpoints) {
 
     for (const api of apis) {
         for (const transactionEndpoint of transactionEndpoints) {
-            uniqueCombinations.push({ api, transactionEndpoint });
+            uniqueCombinations.push({
+                api,
+                transactionEndpoint
+            });
         }
     }
 
@@ -462,7 +501,6 @@ async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addr
         transactionCounts
     };
 }
-
 
 
 
