@@ -26,19 +26,28 @@
   </head>
 <body>
   <h1>Etherscan API</h1>
+  <hr>
  <div>
-  <label for="etherscan-api-key">Enter your Etherscan API Key:</label>
+  <label for="etherscan-api-key">Etherscan API Key:</label>
   <input type="text" id="etherscan-api-key" placeholder="Your Etherscan API Key">
  </div>
+ <br>
  <div>
-  <label for="arbiscan-api-key">Enter your Arbiscan API Key:</label>
+  <label for="arbiscan-api-key">Arbiscan API Key:</label>
   <input type="text" id="arbiscan-api-key" placeholder="Your Arbiscan API Key">
  </div>
-  <label for="singleAddress">Enter Ethereum addresses (comma-separated):</label>
+ <hr>
+    <br>
+    <hr>
+
+ <div>
+  <label for="singleAddress">Addresses (comma-separated):</label>
   <input type="text" id="singleAddress" placeholder="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae, 0x742d35Cc6634C0532925a3b844Bc454e4438f44e">
   <button id="fetchAndDisplayTransactions">Fetch and Display Transactions</button>
+</div>
 
   <div id="summary"></div>
+  <hr>
   <div id="results"></div>
 </body>
 
@@ -56,18 +65,18 @@ class BlockchainAPI {
         this.startTime = Date.now();
     }
 
-    async fetchTransactionDataWithPagination(args) {
-        const data = await this.fetchTransactionData(args);
-        if (data.length === 10000) {
-            console.log("Fetching next page...");
-            const nextPageData = await this.fetchTransactionDataWithPagination({
-                ...args,
-                page: args.page + 1,
-            });
-            return data.concat(nextPageData);
-        }
-        return data;
+async fetchTransactionDataWithPagination(args, api) { 
+    const data = await this.fetchTransactionData(args);
+    if (data.length === 10000) {
+        console.log("Fetching next page...");
+        const nextPageData = await this.fetchTransactionDataWithPagination({
+            ...args,
+            page: args.page + 1,
+        }, api); 
+        return data.concat(nextPageData);
     }
+    return data;
+}
 
 
     async fetchTransactionData({
@@ -160,9 +169,40 @@ async function fetchAndDisplayTransactions() {
 }
 
 function createBlockchainAPIs() {
-    const etherscanApi = new EtherscanAPI(document.getElementById('etherscan-api-key').value);
-    const arbiscanApi = new ArbiscanAPI(document.getElementById('arbiscan-api-key').value);
-    return [etherscanApi, arbiscanApi];
+    const etherscanApiKey = document.getElementById('etherscan-api-key').value;
+    const arbiscanApiKey = document.getElementById('arbiscan-api-key').value;
+
+    console.log("Etherscan API Key:", etherscanApiKey);
+    console.log("Arbiscan API Key:", arbiscanApiKey);
+
+    const apis = [];
+
+    if (etherscanApiKey) {
+        const etherscanApi = new EtherscanAPI(etherscanApiKey);
+        if (etherscanApi) { // New check
+            apis.push(etherscanApi);
+        } else {
+            console.error("Etherscan API object is undefined"); 
+        }
+    }
+
+    if (arbiscanApiKey) {
+        const arbiscanApi = new ArbiscanAPI(arbiscanApiKey);
+        if (arbiscanApi) { 
+            apis.push(arbiscanApi);
+        } else {
+            console.error("Arbiscan API object is undefined"); 
+        }
+    }
+
+    console.log("APIs:", apis);
+
+    if (apis.length === 0) {
+        alert('Please provide at least one valid API key (Etherscan or Arbiscan).');
+        throw new Error('Valid API keys missing');
+    }
+
+    return apis;
 }
 
 function getInputAddresses() {
@@ -209,11 +249,12 @@ function calculateConcurrency(addressesCount, transactionTypesCount, concurrency
 
 
 async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
-    const transactionEndpoints = [{
-        singleTransactionType: 'txlist',
-        buildURLFunction: api => api.buildTxlistURL.bind(api),
-        transactionFetchFunction: fetchSingleAddressTransactions
-    },
+    const transactionEndpoints = [
+        {
+            singleTransactionType: 'txlist',
+            buildURLFunction: api => api.buildTxlistURL.bind(api),
+            transactionFetchFunction: fetchSingleAddressTransactions
+        },
         {
             singleTransactionType: 'txlistinternal',
             buildURLFunction: api => api.buildTxlistInternalURL.bind(api),
@@ -236,18 +277,20 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
         },
     ];
 
-
-const allTransactions = [];
+    const allTransactions = [];
 
     const addressesCount = addresses.length;
     const transactionTypesCount = transactionEndpoints.length;
     const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
 
     for (const api of apis) {
-        await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
-            const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api);
-            allTransactions.push(...transactions);
-        }), concurrency);
+        if (api) { // Add a check for undefined API objects
+            console.log("API being used:", api);
+            await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
+                const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api);
+                allTransactions.push(...transactions);
+            }), concurrency);
+        }
     }
 
     return allTransactions;
@@ -309,7 +352,7 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
             page: 1,
             retries: 20,
             delay: 500
-        });
+        }, api); 
 
         return records;
     } catch (error) {
@@ -317,8 +360,6 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
         return [];
     }
 }
-
-
 
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
