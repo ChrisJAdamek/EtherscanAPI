@@ -214,14 +214,14 @@ class BlockchainAPI {
         this.startTime = Date.now();
     }
 
-async fetchTransactionDataWithPagination(args, api) { 
+async fetchTransactionDataWithPagination(args) { 
     const data = await this.fetchTransactionData(args);
     if (data.length === 10000) {
         console.log("Fetching next page...");
         const nextPageData = await this.fetchTransactionDataWithPagination({
             ...args,
             page: args.page + 1,
-        }, api); 
+        }); 
         return data.concat(nextPageData);
     }
     return data;
@@ -428,36 +428,41 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
 
     const allTransactions = [];
 
-    const addressesCount = addresses.length;
-    const transactionTypesCount = transactionEndpoints.length;
-    const concurrency = calculateConcurrency(addressesCount, transactionTypesCount);
+    const uniqueCombinations = generateUniqueCombinations(apis, transactionEndpoints);
+    const concurrency = calculateConcurrency(addresses.length, transactionEndpoints.length);
 
-    for (const api of apis) {
-        if (api) { // Add a check for undefined API objects
-            console.log("API being used:", api);
-            await promiseAllWithConcurrency(transactionEndpoints.map(transactionEndpoint => async () => {
-                const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api);
-                allTransactions.push(...transactions);
-            }), concurrency);
-        }
-    }
+    await promiseAllWithConcurrency(uniqueCombinations.map(({ api, transactionEndpoint }) => async () => {
+        const { transactions, transactionCounts } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
+        allTransactions.push(...transactions);
+    }), concurrency);
 
     return allTransactions;
 }
 
+function generateUniqueCombinations(apis, transactionEndpoints) {
+    const uniqueCombinations = [];
 
+    for (const api of apis) {
+        for (const transactionEndpoint of transactionEndpoints) {
+            uniqueCombinations.push({ api, transactionEndpoint });
+        }
+    }
 
-async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api) {
+    return uniqueCombinations;
+}
+
+async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction) {
     const {
         allTransactions: transactions,
         addressTransactionCounts: transactionCounts
-    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
+    } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, buildURLFunction);
 
     return {
         transactions,
         transactionCounts
     };
 }
+
 
 
 
@@ -500,15 +505,17 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
             singleAddress,
             page: 1,
             retries: 20,
-            delay: 500
-        }, api); 
+            delay: 500,
+            api: api
+        });
 
         return records;
     } catch (error) {
-        console.error("Error fetching transactions and transfers:", error);
+        console.error(`Error fetching transactions for singleAddress ${singleAddress} and singleTransactionType ${singleTransactionType}:`, error);
         return [];
     }
 }
+
 
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
