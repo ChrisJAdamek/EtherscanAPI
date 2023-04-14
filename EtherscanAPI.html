@@ -16,7 +16,7 @@
         }
 
         .container {
-            max-width: 2000px;
+            max-width: 3000px;
             margin: 0 auto;
             padding: 30px;
         }
@@ -122,13 +122,14 @@
             width: 100%;
             table-layout: fixed;
             border-collapse: collapse;
-                     background-color: #ffffff;
+            background-color: #ffffff;
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
 
         th,
         td {
+
             border: 1px solid #dee2e6;
             padding: 8px;
             text-align: left;
@@ -160,6 +161,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -203,81 +205,72 @@
 <script>
 
 document.addEventListener('DOMContentLoaded', () => {
+    console.log(`[DEBUG] [${new Date().toISOString()}] Document ready, setting up event listeners.`);
     setupEventListeners();
 });
 
-function setupEventListeners() {
-    document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
-}
-
 class BlockchainAPI {
     constructor(apiKey, baseUrl) {
+        console.log(`[DEBUG] [${new Date().toISOString()}] Creating new BlockchainAPI instance for:`, baseUrl);
         this.apiKey = apiKey;
         this.baseUrl = baseUrl;
         this.apiCallCount = 0;
         this.startTime = Date.now();
-        this.tokens = 3;
-        this.maxTokens = 3;
-        this.tokenRate = 1 / 3;
-        this.addTokens();
-    }
-
-    addTokens() {
-        if (this.tokens < this.maxTokens) {
-            this.tokens += 1;
+        this.rateLimiters = {
+            txlist: new TokenBucket('txlist', 1, 350),
+            txlistinternal: new TokenBucket('txlistinternal', 1, 350),
+            tokentx: new TokenBucket('tokentx', 1, 350),
+            tokennfttx: new TokenBucket('tokennfttx', 1, 350),
+            token1155tx: new TokenBucket('token1155tx', 1, 359)
         }
-        setTimeout(() => this.addTokens(), this.tokenRate * 1000);
     }
 
-    async waitForToken() {
-        return new Promise((resolve) => {
-            const tryConsumeToken = () => {
-                if (this.tokens > 0) {
-                    this.tokens -= 1;
-                    resolve();
-                } else {
-                    setTimeout(tryConsumeToken, this.tokenRate * 1000);
-                }
-            };
-            tryConsumeToken();
-        });
+    async initiateTransactionDataAssembly(args) {
+        console.log(`[DEBUG] [${new Date().toISOString()}] initiateTransactionDataAssembly called with args:`, args);
+        return this.assembleTransactionDataWithPagination(args);
     }
 
-    async fetchTransactionData(args) {
-        await this.waitForToken();
-        return this.fetchTransactionDataWithPagination(args);
-    }
-
-    async fetchTransactionDataWithPagination(args) {
+    async assembleTransactionDataWithPagination(args) {
+        console.log(`[DEBUG] [${new Date().toISOString()}] assembleTransactionDataWithPagination called with args:`, args);
         const data = await this.fetchTransactionDataCore(args);
         if (data.length === 10000) {
-            console.log("Fetching next page...");
-            const nextPageData = await this.fetchTransactionDataWithPagination({
+            console.log(`[DEBUG] [${new Date().toISOString()}] Fetching next page...`);
+            const nextPageData = await this.assembleTransactionDataWithPagination({
                 ...args,
                 page: args.page + 1,
             });
+            console.log(`[DEBUG] [${new Date().toISOString()}] Concatenating data from next page`);
             return data.concat(nextPageData);
         }
+        console.log(`[DEBUG] [${new Date().toISOString()}] Returning data:`, data);
         return data;
     }
 
-    // Renamed function to avoid confusion and fixed function parameters
-    async fetchTransactionDataCore({
-        singleTransactionType,
-        buildURLFunction,
-        singleAddress,
-        page = 1,
-        retries = 20,
-        delay = 500
-    }) {
-        this.apiCallCount++;
-        const url = buildURLFunction(singleAddress, page);
-        try {
-            const response = await fetch(url);
-            const data = await response.json();
+async fetchTransactionDataCore({
+    singleTransactionType,
+    buildURLFunction,
+    singleAddress,
+    page = 1,
+    retries = 20,
+    delay = 500
+}) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] Starting fetchTransactionDataCore`);
+    
+    await this.rateLimiters[singleTransactionType].consume();
+    this.apiCallCount++;
 
-            if (data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached" && retries > 0) {
-                console.warn("Max rate limit reached. Retrying...");
+    const url = buildURLFunction(singleAddress, page);
+    console.log(`[DEBUG] [${new Date().toISOString()}] fetchTransactionDataCore called with singleTransactionType: ${singleTransactionType}, singleAddress: ${singleAddress}, page: ${page}, retries: ${retries}, delay: ${delay}`);
+    console.log(`[DEBUG] [${new Date().toISOString()}] Fetching data from URL: ${url}`);
+
+       try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if ((data.status === "0" && data.message === "NOTOK" && data.result === "Max rate limit reached") || response.status === 429) {
+            if (retries > 0) {
+                const currentAttempt = 21 - retries; // Assuming a maximum of 20 retries (initial value)
+                console.warn(`[DEBUG] [${new Date().toISOString()}] Max rate limit reached or Status 429 Too Many Requests for endpoint: ${url}. Retrying attempt ${currentAttempt} of 20.`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return await this.fetchTransactionDataCore({
                     singleTransactionType,
@@ -287,18 +280,29 @@ class BlockchainAPI {
                     retries: retries - 1,
                     delay: delay * 2
                 });
+            } else {
+                console.error(`[DEBUG] [${new Date().toISOString()}] Max rate limit reached or Status 429 Too Many Requests for endpoint: ${url}. No more retries left.`);
+                return [];
             }
-            if (this.apiCallCount % 1 === 0) { // Log every call or choose your preferred frequency
-                const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
-                console.log(`API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
-            }
-
-            return Array.isArray(data.result) ? data.result : [];
-        } catch (error) {
-            console.error("Error fetching data:", error);
-            return [];
         }
+        if (this.apiCallCount % 1 === 0) { // Log every call or choose your preferred frequency
+            const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(2);
+            console.log(`[DEBUG] [${new Date().toISOString()}] API call count: ${this.apiCallCount}, Elapsed time: ${elapsedTime} seconds`);
+        }
+
+        console.log(`[DEBUG] [${new Date().toISOString()}] Returning data result:`, data.result);
+        return Array.isArray(data.result) ? data.result : [];
+    } catch (error) {
+        console.error(`[DEBUG] [${new Date().toISOString()}] Error fetching data:`, error);
+        return [];
+    } finally {
+        console.log(`[DEBUG] [${new Date().toISOString()}] Exiting fetchTransactionDataCore`);
     }
+}
+
+
+
+
 
     buildTxlistURL(singleAddress, page) {
         return this.buildBaseURL('txlist', singleAddress, page);
@@ -328,38 +332,87 @@ class BlockchainAPI {
 class EtherscanAPI extends BlockchainAPI {
     constructor(apiKey) {
         super(apiKey, "https://api.etherscan.io/api");
+        console.log('EtherscanAPI constructor called with apiKey:', apiKey);
     }
 }
 
 class ArbiscanAPI extends BlockchainAPI {
     constructor(apiKey) {
         super(apiKey, "https://api.arbiscan.io/api");
+        console.log('ArbiscanAPI constructor called with apiKey:', apiKey);
+
+    }
+}
+
+class TokenBucket {
+    constructor(transactionType, tokensPerSecond, interval) {
+        console.log(`[DEBUG] [${new Date().toISOString()}] Creating new TokenBucket instance for transaction type: ${transactionType}`);
+        this.transactionType = transactionType;
+        this.tokensPerSecond = tokensPerSecond;
+        this.interval = interval;
+        this.lastRefillTime = Date.now();
+        this.tokens = tokensPerSecond;
+    }
+
+async consume() {
+    console.log(`[DEBUG] [${new Date().toISOString()}] Consuming token from ${this.transactionType} bucket`);
+    const now = Date.now();
+    this.refill(now);
+
+    while (this.tokens <= 0) {
+        const sleepTime = this.interval - (now - this.lastRefillTime);
+        console.log(`[DEBUG] [${new Date().toISOString()}] Waiting for ${sleepTime} ms before consuming token from ${this.transactionType} bucket`);
+        await new Promise((resolve) => setTimeout(resolve, sleepTime));
+        console.log(`[DEBUG] [${new Date().toISOString()}] Attempting to refill tokens for ${this.transactionType} bucket`);
+        this.refill(Date.now());
+    }
+
+    this.tokens -= 1;
+    console.log(`[DEBUG] [${new Date().toISOString()}] Token consumed from ${this.transactionType} bucket, remaining tokens: ${this.tokens}`);
+    return true;
+}
+
+
+    refill(now) {
+        const elapsedTime = now - this.lastRefillTime;
+
+        if (elapsedTime >= this.interval) {
+            this.tokens = this.tokensPerSecond;
+            this.lastRefillTime = now;
+            console.log(`[DEBUG] [${new Date().toISOString()}] Refilled tokens for ${this.transactionType} bucket, new token count: ${this.tokens}`);
+        }
     }
 }
 
 
-
 async function fetchAndDisplayTransactions() {
+    console.log(`[DEBUG] [${new Date().toISOString()}] fetchAndDisplayTransactions called`);
     const [etherscanApi, arbiscanApi] = createBlockchainAPIs();
     const addresses = getInputAddresses();
 
+    console.log(`[DEBUG] [${new Date().toISOString()}] Addresses obtained:`, addresses);
     const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-    const allTransactions = await fetchAllTransactions(addresses, addressTransactionCounts, [etherscanApi, arbiscanApi]);
+    console.log(`[DEBUG] [${new Date().toISOString()}] Initialized address transaction counts:`, addressTransactionCounts);
+    const allTransactions = await loadAllTransactionData(addresses, addressTransactionCounts, [etherscanApi, arbiscanApi]);
+    console.log(`[DEBUG] [${new Date().toISOString()}] All transactions fetched, displaying transactions...`);
     displayTransactions(addressTransactionCounts, allTransactions);
 }
 
+
+
 function createBlockchainAPIs() {
+    console.log('createBlockchainAPIs called');
     const etherscanApiKey = document.getElementById('etherscan-api-key').value;
     const arbiscanApiKey = document.getElementById('arbiscan-api-key').value;
 
-    console.log("Etherscan API Key:", etherscanApiKey);
-    console.log("Arbiscan API Key:", arbiscanApiKey);
+    console.log("Etherscan API Key found:", etherscanApiKey);
+    console.log("Arbiscan API Key found:", arbiscanApiKey);
 
     const apis = [];
 
     if (etherscanApiKey) {
         const etherscanApi = new EtherscanAPI(etherscanApiKey);
-        if (etherscanApi) { // New check
+        if (etherscanApi) {
             apis.push(etherscanApi);
         } else {
             console.error("Etherscan API object is undefined");
@@ -386,13 +439,17 @@ function createBlockchainAPIs() {
 }
 
 function getInputAddresses() {
+    console.log(`[DEBUG] [${new Date().toISOString()}] getInputAddresses called`);
     const inputAddresses = document.getElementById('singleAddress').value;
-    return inputAddresses.split(',').map(a => a.trim());
+    const addressArray = inputAddresses.split(',').map(a => a.trim());
+    console.log(`[DEBUG] [${new Date().toISOString()}] Parsed addresses:`, addressArray);
+    return addressArray;
 }
 
 
 
 function initializeAddressTransactionCounts(addresses) {
+    console.log('Initializing address transaction counts for addresses:', addresses);
     const addressTransactionCounts = {};
     addresses.forEach(singleAddress => addressTransactionCounts[singleAddress] = 0);
     return addressTransactionCounts;
@@ -400,35 +457,63 @@ function initializeAddressTransactionCounts(addresses) {
 
 
 async function promiseAllWithConcurrency(promises, concurrency) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] called with concurrency: ${concurrency}`);
+    console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] promises to execute:`, promises);
     const results = [];
     const executing = [];
 
+    const executeWithRetries = async (executeFunction, retries, delay) => {
+        console.log(`[DEBUG] [${new Date().toISOString()}] [executeWithRetries] Executing with retries remaining: ${retries}`);
+        try {
+            return await executeFunction();
+        } catch (error) {
+            console.log(`[DEBUG] [${new Date().toISOString()}] [executeWithRetries] Error encountered:`, error.message);
+            if (retries > 0 && error.message.includes('429')) {
+                console.log(`[DEBUG] [${new Date().toISOString()}] [executeWithRetries] Retrying after ${delay} ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return executeWithRetries(executeFunction, retries - 1, delay);
+            } else {
+                console.error(`[DEBUG] [${new Date().toISOString()}] [executeWithRetries] Error not retriable or no retries left. Throwing error...`);
+                throw error;
+            }
+        }
+    };
+
     for (const promise of promises) {
-        const p = promise();
+        console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] Processing promise:`, promise);
+
+        const p = executeWithRetries(promise.execute, 20, 1000);
         results.push(p);
 
         if (concurrency <= promises.length) {
-            const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+            const e = p.then(() => {
+                console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] Promise completed:`, promise);
+                executing.splice(executing.indexOf(e), 1);
+            });
             executing.push(e);
             if (executing.length >= concurrency) {
+                console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] Concurrency limit reached, awaiting completion of a promise...`);
                 await Promise.race(executing);
             }
         }
     }
 
+    console.log(`[DEBUG] [${new Date().toISOString()}] [promiseAllWithConcurrency] Waiting for all promises to complete...`);
     return Promise.all(results);
 }
 
 function calculateConcurrency(addressesCount, transactionTypesCount, concurrencyPercentage = 0.1) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] calculateConcurrency called with addressesCount: ${addressesCount}, transactionTypesCount: ${transactionTypesCount}`);
     const totalTasks = addressesCount * transactionTypesCount;
     const concurrency = Math.ceil(totalTasks * concurrencyPercentage);
-
-    // Ensure concurrency is at least 1 to prevent blocking the execution
     return Math.max(1, concurrency);
 }
 
 
-async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
+async function loadAllTransactionData(addresses, addressTransactionCounts, apis) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [loadAllTransactionData] called with addresses:`, addresses, `addressTransactionCounts:`, addressTransactionCounts, `apis:`, apis);
+
+
     const transactionEndpoints = [{
             singleTransactionType: 'txlist',
             buildURLFunction: api => api.buildTxlistURL.bind(api),
@@ -461,51 +546,75 @@ async function fetchAllTransactions(addresses, addressTransactionCounts, apis) {
     const uniqueCombinations = generateUniqueCombinations(apis, transactionEndpoints);
     const concurrency = calculateConcurrency(addresses.length, transactionEndpoints.length);
 
+
     await promiseAllWithConcurrency(uniqueCombinations.map(({
         api,
         transactionEndpoint
-    }) => async () => {
-        const {
-            transactions,
-            transactionCounts
-        } = await fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
-        allTransactions.push(...transactions);
+    }) => {
+        return {
+            apiEndpoint: transactionEndpoint.singleTransactionType,
+            async execute() {
+                console.log(`[DEBUG] [${new Date().toISOString()}] Executing for apiEndpoint: ${transactionEndpoint.singleTransactionType}`);
+
+                const {
+                    transactions,
+                    transactionCounts
+                } = await loadTransactionsForGivenEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
+                allTransactions.push(...transactions);
+                console.log(`[DEBUG] [${new Date().toISOString()}] [loadAllTransactionData] Transactions fetched for apiEndpoint: ${transactionEndpoint.singleTransactionType}, transactions:`, transactions);
+            },
+        };
     }), concurrency);
 
     return allTransactions;
 }
 
+
+
 function generateUniqueCombinations(apis, transactionEndpoints) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [generateUniqueCombinations] called with apis:`, apis, `transactionEndpoints:`, transactionEndpoints);
     const uniqueCombinations = [];
 
-    for (const api of apis) {
-        for (const transactionEndpoint of transactionEndpoints) {
+    for (const [apiIndex, api] of apis.entries()) {
+        console.log(`[DEBUG] [${new Date().toISOString()}] [generateUniqueCombinations] Processing API at index ${apiIndex}:`, api);
+        for (const [transactionEndpointIndex, transactionEndpoint] of transactionEndpoints.entries()) {
+            console.log(`[DEBUG] [${new Date().toISOString()}] [generateUniqueCombinations] Processing transactionEndpoint at index ${transactionEndpointIndex}:`, transactionEndpoint);
             uniqueCombinations.push({
+                api,
+                transactionEndpoint
+            });
+            console.log(`[DEBUG] [${new Date().toISOString()}] [generateUniqueCombinations] Added combination:`, {
                 api,
                 transactionEndpoint
             });
         }
     }
 
+    console.log(`[DEBUG] [${new Date().toISOString()}] [generateUniqueCombinations] Generated uniqueCombinations:`, uniqueCombinations);
     return uniqueCombinations;
 }
 
-async function fetchTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction) {
+
+async function loadTransactionsForGivenEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [loadTransactionsForGivenEndpoint] called with transactionEndpoint:`, transactionEndpoint, "addresses:", addresses, "addressTransactionCounts:", addressTransactionCounts, "api:", api);
+
+    const key = transactionEndpoint.singleTransactionType;
+
+    console.log(`[DEBUG] [${new Date().toISOString()}] [loadTransactionsForGivenEndpoint] Calling fetchTransactionsForAllAddresses with transactionFetchFunction:`, transactionEndpoint.transactionFetchFunction);
     const {
         allTransactions: transactions,
         addressTransactionCounts: transactionCounts
     } = await fetchTransactionsForAllAddresses(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, buildURLFunction);
 
+    console.log(`[DEBUG] [${new Date().toISOString()}] [loadTransactionsForGivenEndpoint] Returning transactions and transactionCounts`);
     return {
         transactions,
         transactionCounts
     };
 }
 
-
-
-
 async function fetchTransactionsForAllAddresses(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, api, buildURLFunction) {
+    console.log('Fetching transactions for all addresses:, addresses');
     const allTransactions = [];
 
     for (const singleAddress of addresses) {
@@ -521,8 +630,10 @@ async function fetchTransactionsForAllAddresses(transactionFetchFunction, addres
 }
 
 
-
 async function fetchTransactionsForAddress(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] Fetching transactions for address:`, singleAddress, 'for transaction type:', singleTransactionType);
+    console.log(`[DEBUG] [${new Date().toISOString()}] Transaction fetch function:`, transactionFetchFunction);
+    console.log(`[DEBUG] [${new Date().toISOString()}] API:`, api);
     const records = await transactionFetchFunction(singleAddress, singleTransactionType, api, buildURLFunction);
     const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
     const transactionMapper = tx => ({
@@ -533,11 +644,11 @@ async function fetchTransactionsForAddress(transactionFetchFunction, singleAddre
     return records.map(transactionMapper);
 }
 
-
-
 async function fetchSingleAddressTransactions(singleAddress, singleTransactionType, api, buildURLFunction) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] Fetching single address transactions for address ${singleAddress} and transaction type ${singleTransactionType} using API ${api}`);
+
     try {
-        const records = await api.fetchTransactionDataWithPagination({
+        const records = await api.assembleTransactionDataWithPagination({
             singleTransactionType: singleTransactionType,
             buildURLFunction: buildURLFunction(api),
             singleAddress,
@@ -549,119 +660,139 @@ async function fetchSingleAddressTransactions(singleAddress, singleTransactionTy
 
         return records;
     } catch (error) {
-        console.error(`Error fetching transactions for singleAddress ${singleAddress} and singleTransactionType ${singleTransactionType}:`, error);
+        console.error(`[ERROR] [${new Date().toISOString()}] Error fetching transactions for singleAddress ${singleAddress} and singleTransactionType ${singleTransactionType}:`, error);
         return [];
     }
 }
 
-
+function setupEventListeners() {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [setupEventListeners] Setting up event listeners`);
+    document.getElementById('fetchAndDisplayTransactions').addEventListener('click', fetchAndDisplayTransactions);
+    console.log(`[DEBUG] [${new Date().toISOString()}] [setupEventListeners] Event listener for fetchAndDisplayTransactions set up`);
+}
 
 function displayTransactions(addressTransactionCounts, allTransactions) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [displayTransactions] Displaying transactions with addressTransactionCounts:`, addressTransactionCounts, `allTransactions:`, allTransactions);
     displayTransactionSummary(addressTransactionCounts, allTransactions.length);
     displayTransactionTable(allTransactions);
 }
 
 function displayTransactionSummary(addressTransactionCounts, totalCount) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [displayTransactionSummary] Displaying transaction summary with totalCount: ${totalCount} and addressTransactionCounts:`, addressTransactionCounts);
     const summaryDiv = document.getElementById('summary');
     const summaryItems = generateSummaryItems(addressTransactionCounts);
     summaryDiv.innerHTML = `Total entries found: ${totalCount}<br>${summaryItems}`;
 }
 
 function generateSummaryItems(addressTransactionCounts) {
-    return Object.entries(addressTransactionCounts)
+    console.log(`[DEBUG] [${new Date().toISOString()}] [generateSummaryItems] Generating summary items with addressTransactionCounts:`, addressTransactionCounts);
+    const summaryItems = Object.entries(addressTransactionCounts)
         .map(([singleAddress, count]) => `Entries found for ${singleAddress}: ${count}<br>`)
         .join('');
+    console.log(`[DEBUG] [${new Date().toISOString()}] [generateSummaryItems] Generated summary items:`);
+    return summaryItems;
 }
 
 function displayTransactionTable(transactions) {
+    console.log(`[DEBUG] [${new Date().toISOString()}] [displayTransactionTable] Displaying transaction table with transactions:`);
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
 
     transactions.sort((a, b) => parseInt(a.timeStamp) - parseInt(b.timeStamp));
+    console.log(`[DEBUG] [${new Date().toISOString()}] [displayTransactionTable] Sorted transactions:`);
 
     const table = createTransactionTable(transactions);
     resultsDiv.appendChild(table);
+    console.log(`[DEBUG] [${new Date().toISOString()}] [displayTransactionTable] Transaction table appended to resultsDiv`);
 }
 
 function createTransactionTable(transactions) {
+ 
     const table = document.createElement('table');
     const header = createTransactionTableHeader();
     const body = createTransactionTableBody(transactions);
 
     table.innerHTML = header + body;
+
     return table;
 }
-
-
 
 
 function createTransactionTableHeader() {
     return `
     <tr>
-      <th>Type</th>
-      <th>Timestamp</th>
-      <th>TX Hash</th>
-      <th>Function</th>
-      <th>Value</th>
-      <th>Token Symbol</th>
-      <th>From</th>
-      <th>To</th>
-      <th>Contract Address</th>
-      <th>TokenID</th>
-      <th>TX Fee (ETH)</th>
-      <!--<th>Token Name</th>-->
-      <!--<th>Gas Price (Gwei)</th>-->
-      <!--th>TX Failed</th>-->
+      <th style="width:3%">Type</th>
+      <th style="width:10%">Timestamp</th>
+      <th style="width:7%">TX Hash</th>
+      <th style="width:10%">Function</th>
+      <th style="width:5%">Value</th>
+      <th style="width:7%">Token Symbol</th>
+      <th style="width:15%">From</th>
+      <th style="width:15%">To</th>
+      <th style="width:15%">Contract Address</th>
+      <!--th style="width:5%">TokenID</th-->
+      <th style="width:5%">TX Fee (ETH)</th>
     </tr>
   `;
 }
 
 function createTransactionTableBody(transactions) {
-    return transactions.map(tx => createEachTransactionTableRow(tx)).join('');
+
+    const tableBody = transactions.map(tx => createEachTransactionTableRow(tx)).join('');
+
+    return tableBody;
 }
 
 function createEachTransactionTableRow(tx) {
+
     const value = getTransactionValue(tx);
     const tokenSymbol = getTransactionTokenSymbol(tx);
     const transactionFee = ((parseInt(tx.gasPrice) * parseInt(tx.gasUsed)) / 1e18).toFixed(6);
-    const functionName = tx.functionName ? tx.functionName.split('(')[0] : 'N/A';
+    const functionName = tx.functionName ? tx.functionName.split('(')[0] : '';
 
-    return `
-		<tr>
-		    <td>${tx.type}</td>
-		    <td>${new Date(tx.timeStamp * 1000).toLocaleString()}</td>
-		    <td>${tx.hash}</td>
-		    <td>${functionName}</td>
-		    <td>${value}</td>
-		    <td>${tokenSymbol}</td>
-		    <td>${tx.from}</td>
-		    <td>${tx.to}</td>
-		    <td>${tx.contractAddress}</td>
-		    <td>${tx.tokenID ?? 'N/A'}</td>
-		    <td>${transactionFee}</td>
-		    <!--<td>${tx.tokenName || 'N/A'}</td>-->
-		    <!--<td>${(parseInt(tx.gasPrice) / 1e9).toFixed(6)}</td>-->
-		    <!-- <td>${tx.isError === '1' ? 'Yes' : 'No'}</td>-->
-		</tr>
-	    `;
+    const tableRow = `
+        <tr>
+            <td>${tx.type}</td>
+            <td>${new Date(tx.timeStamp * 1000).toLocaleString()}</td>
+            <td>${tx.hash}</td>
+            <td>${functionName}</td>
+            <td>${value}</td>
+            <td>${tokenSymbol}</td>
+            <td>${tx.from}</td>
+            <td>${tx.to}</td>
+            <td>${tx.contractAddress}</td>
+            <!--td>${tx.tokenID ?? 'N/A'}</td-->
+            <td>${transactionFee}</td>
+        </tr>
+        `;
+
+    return tableRow;
 }
 
 function getTransactionValue(tx) {
+
+    let value;
     if (['normal', 'internal', 'erc20'].includes(tx.type)) {
-        return getEthOrErc20TransactionValue(tx);
+        value = getEthOrErc20TransactionValue(tx);
     } else if (tx.type === 'erc721') {
-        return 1;
+        value = 1;
     } else if (tx.type === 'erc1155') {
-        return tx.tokenValue;
+        value = tx.tokenValue;
     }
+
+    return value;
 }
 
 function getEthOrErc20TransactionValue(tx) {
+
     const decimal = tx.type === 'erc20' && tx.tokenDecimal !== 'N/A' ? tx.tokenDecimal : 18;
-    return (parseInt(tx.value) / Math.pow(10, decimal)).toFixed(6);
+    const value = (parseInt(tx.value) / Math.pow(10, decimal)).toFixed(6);
+
+    return value;
 }
 
 function getTransactionTokenSymbol(tx) {
+
     if (['internal', 'normal'].includes(tx.type)) {
         return 'ETH';
     } else if (tx.type === 'erc20') {
@@ -671,4 +802,4 @@ function getTransactionTokenSymbol(tx) {
     }
 }
 </script>
-</html> 
+</html>
