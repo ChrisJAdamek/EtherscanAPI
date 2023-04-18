@@ -215,75 +215,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 class BlockchainAPI {
-  constructor(t, n) {
-    this.apiKey = t;
-    this.baseUrl = n;
-    this.apiCallCount = 0;
-    this.startTime = Date.now();
-  }
-
-async sleep(delay) {
-  return new Promise(resolve => setTimeout(resolve, delay));
-}
-
-async fetchTransactionsWithDelay(delay, args) {
-  await this.sleep(delay);
-  return this.fetchTransactions(args);
-}
-
-  async fetchTransactions({ singleTransactionType, buildURLFunction, singleAddress, page = 1, retries = 20, delay = 500, error = null }) {
-    this.apiCallCount++;
-    let l = buildURLFunction(singleAddress, page);
-
-    // Sleep to manage rate limits
-    await this.sleep(this.apiCallCount * 200); // 334 ms per call
-
-    try {
-      let o = await fetch(l),
-        c = await o.json();
-      if ("0" === c.status && "NOTOK" === c.message && "Max rate limit reached" === c.result || 429 === o.status) {
-        if (!(retries > 0)) return { failed: !0, data: [] };
-        {
-          await new Promise(t => setTimeout(t, delay));
-          let u = await this.fetchTransactions({ singleTransactionType, buildURLFunction, singleAddress, page, retries: retries - 1, delay: 2 * delay, error });
-          return u;
-        }
-      }
-      return this.apiCallCount % 1 == 0 && ((Date.now() - this.startTime) / 1e3).toFixed(2), Array.isArray(c.result) ? { failed: !1, data: c.result } : { failed: !1, data: [] };
-    } catch (d) {
-      return await this.fetchTransactions({ singleTransactionType, buildURLFunction, singleAddress, page, retries: retries - 1, delay: 2 * delay, error: d });
-    } finally { }
-  }
-
-  totalElapsedTime() {
-    return ((Date.now() - this.startTime) / 1000).toFixed(2);
-  }
-  
-  
-     async initiateTransactionDataAssembly(args) {
-        console.log(`[DEBUG] [${totalElapsedTime()}s] initiateTransactionDataAssembly called with args:`, args);
-        return this.concatenateTransactionDataWithPagination(args);
+    constructor(t, n) {
+        this.apiKey = t;
+        this.baseUrl = n;
+        this.apiCallCount = 0;
+        this.startTime = Date.now();
     }
-    async concatenateTransactionDataWithPagination(args) {
-        console.log(`[DEBUG] [${totalElapsedTime()}s] concatenateTransactionDataWithPagination called with args:`, args);
-        const data = await this.fetchTransactions(args);
-        if (data.length === 10000) {
-            console.log(`[DEBUG] [${totalElapsedTime()}s] Fetching next page...`);
-            const nextPageData = await this.concatenateTransactionDataWithPagination({
-                ...args,
-                page: args.page + 1,
-            });
-            console.log(`[DEBUG] [${totalElapsedTime()}s] Concatenating data from next page`);
-            return data.concat(nextPageData);
-        }
-      
-        return data;
-    }
-
-
-
-
-
 
     buildTxlistURL(singleAddress, page) {
         return this.buildBaseURL('txlist', singleAddress, page);
@@ -305,45 +242,48 @@ async fetchTransactionsWithDelay(delay, args) {
     }
 }
 
-    
-
-
-
-
-
-
-
-
-
 async function retrieveAndDisplayAllTransactions() {
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] called`);
     startTime = new Date();
-    console.log(`[DEBUG] [${totalElapsedTime()}s] retrieveAndDisplayAllTransactions called`);
-    const [etherscanApi, arbiscanApi] = createBlockchainAPIs();
-    const addresses = getInputAddresses();
-    console.log(`[DEBUG] [${totalElapsedTime()}s] Addresses obtained:`, addresses);
-    const addressTransactionCounts = initializeAddressTransactionCounts(addresses);
-    let hasFailedTransactions = false;
-    console.log(`[DEBUG] [${totalElapsedTime()}s] Initialized address transaction counts:`, addressTransactionCounts);
-    const allTransactions = await getAllTransactions(addresses, addressTransactionCounts, [etherscanApi, arbiscanApi]);
-    console.log(`[DEBUG] [${totalElapsedTime()}s] All transactions fetched, displaying transactions...`);
-    const errorMessageElement = document.getElementById("error-message");
-    if (hasFailedTransactions) {
-        errorMessageElement.style.display = "block";
-        errorMessageElement.textContent = "Error: Some transactions could not be fetched.";
-    } else {
-        errorMessageElement.style.display = "none";
+    let [t, n] = createBlockchainAPIs();
+    let e = getInputAddresses();
+    let a = initializeAddressTransactionCounts(e);
+
+    // Create token buckets for rate limiting
+    const tokenBuckets = new Map();
+    for (const api of [t, n]) {
+        for (const transactionType of [
+                'txlist',
+                'txlistinternal',
+                'tokentx',
+                'tokennfttx',
+                'token1155tx',
+            ]) {
+            // Add a third argument to the TokenBucket constructor for the desired delay (450ms)
+            tokenBuckets.set(`${api.baseUrl}_${transactionType}`, new TokenBucket(1, 1, 1000));
+            console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Created token bucket for ${api.baseUrl}_${transactionType}`);
+        }
     }
-    displayTransactions(addressTransactionCounts, allTransactions);
+
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Fetching all transactions`);
+    let i = await getAllTransactions(e, a, [t, n], tokenBuckets);
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] All transactions fetched:`, i);
+    
+    let s = document.getElementById('error-message');
+    s.style.display = 'none';
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Hiding error message`);
+    
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Displaying transactions`);
+    displayTransactions(a, i);
 }
 
 
 
 
-async function getAllTransactions(addresses, addressTransactionCounts, apis) {
+async function getAllTransactions(addresses, addressTransactionCounts, apis, tokenBuckets) {
     console.log(`[DEBUG] [${totalElapsedTime()}s] [getAllTransactions] called with addresses:`, addresses, `addressTransactionCounts:`, addressTransactionCounts, `apis:`, apis);
-    
-    const transactionEndpoints = [
-        {
+
+    const transactionEndpoints = [{
             singleTransactionType: 'txlist',
             buildURLFunction: api => api.buildTxlistURL.bind(api),
             transactionFetchFunction: getPaginatedAddressTransactions
@@ -370,30 +310,31 @@ async function getAllTransactions(addresses, addressTransactionCounts, apis) {
         }
     ];
 
-    const uniqueCombinations = generateUniqueCombinations(apis, transactionEndpoints);
+ const uniqueCombinations = generateUniqueCombinations(apis, transactionEndpoints);
 
-    // Create an array of promises for each unique combination
     const fetchTransactionPromises = uniqueCombinations.map(async ({ api, transactionEndpoint }) => {
-        console.log(`[DEBUG] [${totalElapsedTime()}s] Generating uniqueCombinations: ${transactionEndpoint.singleTransactionType}`);
+        const {
+            transactions,
+            transactionCounts
+        } = await getTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction, tokenBuckets);
 
-        const { transactions, transactionCounts } = await getTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, transactionEndpoint.buildURLFunction);
+        // Update addressTransactionCounts with the transactionCounts from the resolved promise
+        for (const [address, count] of Object.entries(transactionCounts)) {
+            addressTransactionCounts[address] += count;
+        }
 
         return transactions;
     });
 
-    // Wait for all promises to resolve and concatenate the results
     const allTransactions = (await Promise.all(fetchTransactionPromises)).flat();
     console.log(`[DEBUG] [${totalElapsedTime()}s] Await all promises to resolve and concatenate`);
     return allTransactions;
 }
 
-
-
 function generateUniqueCombinations(apis, transactionEndpoints) {
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [generateUniqueCombinations] called with apis:`, apis, `transactionEndpoints:`, transactionEndpoints);
+    console.log(`[DEBUG] [generateUniqueCombinations] called for ${apis}; ${transactionEndpoints} `);
     const uniqueCombinations = [];
     for (const [apiIndex, api] of apis.entries()) {
-        console.log(`[DEBUG] [${totalElapsedTime()}s] [generateUniqueCombinations] Processing: ${api.baseUrl}`);
         for (const [transactionEndpointIndex, transactionEndpoint] of transactionEndpoints.entries()) {
             console.log(`[DEBUG] [${totalElapsedTime()}s] [generateUniqueCombinations] Processing: ${transactionEndpoint.singleTransactionType} for ${api.baseUrl}`);
             uniqueCombinations.push({
@@ -406,46 +347,45 @@ function generateUniqueCombinations(apis, transactionEndpoints) {
             });
         }
     }
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [generateUniqueCombinations] Generated uniqueCombinations:`, uniqueCombinations);
     return uniqueCombinations;
 }
-async function getTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction) {
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [getTransactionsForEndpoint] called with transactionEndpoint:`, api.baseURL, transactionEndpoint.singleTransactionType, "addresses:", addresses);
+async function getTransactionsForEndpoint(transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction, tokenBuckets) {
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [getTransactionsForEndpoint] called for`, transactionEndpoint, addresses, addressTransactionCounts, api, buildURLFunction, tokenBuckets);
     const key = transactionEndpoint.singleTransactionType;
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [getTransactionsForEndpoint] Calling getAllAddressTransactions with transactionFetchFunction:`, transactionEndpoint.transactionFetchFunction);
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [getTransactionsForEndpoint] Key: ${key}`);
+    
     const {
         allTransactions: transactions,
         addressTransactionCounts: transactionCounts
-    } = await getAllAddressTransactions(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, buildURLFunction);
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [getTransactionsForEndpoint] Returning transactions and transactionCounts`);
+    } = await getAllAddressTransactions(transactionEndpoint.transactionFetchFunction, addresses, transactionEndpoint.singleTransactionType, addressTransactionCounts, api, buildURLFunction, tokenBuckets);
+    
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [getTransactionsForEndpoint] Fetched transactions and transactionCounts:`, transactions, transactionCounts);
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [getTransactionsForEndpoint] Returning transactions and transactionCounts`);
+    
     return {
         transactions,
         transactionCounts
     };
 }
-async function getAllAddressTransactions(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, api, buildURLFunction) {
-    console.log('Fetching transactions for all addresses:, addresses');
+
+async function getAllAddressTransactions(transactionFetchFunction, addresses, singleTransactionType, addressTransactionCounts, api, buildURLFunction, tokenBuckets) {
+    console.log(`[DEBUG] [getAllAddressTransactions] called for`, singleAddress, singleTransactionType, api, buildURLFunction, tokenBuckets);
     const allTransactions = [];
+    const localAddressTransactionCounts = { ...addressTransactionCounts };
     for (const singleAddress of addresses) {
-        const transactions = await getSingleAddressTransactions(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction);
+        const transactions = await getSingleAddressTransactions(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction, tokenBuckets);
         allTransactions.push(...transactions);
-        addressTransactionCounts[singleAddress] += transactions.length;
+        localAddressTransactionCounts[singleAddress] += transactions.length;
     }
     return {
         allTransactions,
-        addressTransactionCounts
+        addressTransactionCounts: localAddressTransactionCounts
     };
 }
-async function getSingleAddressTransactions(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction) {
-    console.log(`[DEBUG] [${totalElapsedTime()}s] Fetching transactions for address:`, singleAddress, 'for transaction type:', singleTransactionType);
-    console.log(`[DEBUG] [${totalElapsedTime()}s] Transaction fetch function:`, transactionFetchFunction);
-    console.log(`[DEBUG] [${totalElapsedTime()}s] API:`, api);
-    const result = await transactionFetchFunction(singleAddress, singleTransactionType, api, buildURLFunction);
-    const records = result.data;
-    if (result.failed) {
-        hasFailedTransactions = true;
-        console.error(`[DEBUG] [${totalElapsedTime()}s] Fetching transactions failed for address: ${singleAddress} and transaction type: ${singleTransactionType}`);
-    }
+
+async function getSingleAddressTransactions(transactionFetchFunction, singleAddress, singleTransactionType, api, buildURLFunction, tokenBuckets, ) {
+    console.log(`[DEBUG] [getSingleAddressTransactions] called for ${singleAddress}; ${singleTransactionType}; ${api}; ${buildURLFunction}, ${tokenBuckets}`);
+    const records = await transactionFetchFunction(singleAddress, singleTransactionType, api, buildURLFunction, tokenBuckets);
     const type = singleTransactionType === 'txlist' ? 'normal' : singleTransactionType === 'txlistinternal' ? 'internal' : singleTransactionType === 'tokentx' ? 'erc20' : singleTransactionType === 'tokennfttx' ? 'erc721' : 'erc1155';
     const transactionMapper = tx => ({
         ...tx,
@@ -453,28 +393,106 @@ async function getSingleAddressTransactions(transactionFetchFunction, singleAddr
     });
     return records.map(transactionMapper);
 }
-async function getPaginatedAddressTransactions(singleAddress, singleTransactionType, api, buildURLFunction) {
-    console.log(`[DEBUG] [${totalElapsedTime()}s] Fetching single address transactions for address ${singleAddress} and transaction type ${singleTransactionType} using API ${api}`);
-    try {
-        const records = await api.concatenateTransactionDataWithPagination({
-            singleTransactionType: singleTransactionType,
-            buildURLFunction: buildURLFunction(api),
-            singleAddress,
-            page: 1,
-            retries: 20,
-            delay: 500,
-            api: api
-        });
-        return records;
-    } catch (error) {
-        console.error(`[ERROR] [${totalElapsedTime()}s] Error fetching transactions for singleAddress ${singleAddress} and singleTransactionType ${singleTransactionType}:`, error);
+
+const lastCallTimestamps = new Map();
+
+async function getPaginatedAddressTransactions(singleAddress, singleTransactionType, api, buildURLFunction, tokenBuckets) {
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [getPaginatedAddressTransactions] called for`, singleAddress, singleTransactionType, api);
+    const buildURL = buildURLFunction(api);
+    const endpointKey = `${api.baseUrl}_${singleTransactionType}`;
+    const tokenBucket = tokenBuckets.get(endpointKey);
+
+    const wrappedFetch = async (page = 1, retryCount = 0) => {
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] called with page:`, page, 'retryCount:', retryCount);
+    if (retryCount > 20) {
+        console.error(`[ERROR] [${totalElapsedTime()}s] Max retries exceeded for singleAddress ${singleAddress}; singleTransactionType: ${singleTransactionType}; endpoint: ${api}`, api);
         return [];
     }
+
+    while (!tokenBucket.consume()) {
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    const url = buildURL(singleAddress, page);
+    console.log(`[DEBUG1] [${totalElapsedTime()}s] Generated URL: ${url}`);
+
+    try {
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetching data from URL:`, url);
+        const result = await fetch(url);
+        const data = await result.json();
+
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] API response:`, data);
+        if (data.status === "0" && data.message === "NOTOK") {
+            console.error(`[ERROR] [${totalElapsedTime()}s] Problematic response for URL: ${url}`, data);
+        }
+
+        const records = Array.isArray(data.result) ? data.result : [];
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetched records:`, records);
+
+        if (records && records.length === 10000) {
+            console.log("[DEBUG] Fetching next page...");
+            const nextPageRecords = await wrappedFetch(page + 1);
+            return records.concat(nextPageRecords);
+        }
+
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Returned data:`, records);
+        return records;
+    } catch (error) {
+        console.error(`[ERROR] [${totalElapsedTime()}s] Error fetching data from URL: ${url}`, error);
+        if (!tokenBucket.consume()) {
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
+            await new Promise((resolve) => setTimeout(resolve, tokenBucket.delay));
+        }
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] Retrying after error with page:`, page, 'retryCount:', retryCount + 1);
+        return wrappedFetch(page, retryCount + 1);
+    }
+};
+
+return wrappedFetch();
 }
 
 
+class TokenBucket {
+    constructor(rate, capacity, delay) {
+        console.log('[DEBUG1] TokenBucket constructor called with rate:', rate, 'capacity:', capacity, 'delay:', delay);
+        this.rate = rate;
+        this.capacity = capacity;
+        this.tokens = capacity;
+        this.lastRefill = Date.now();
+        this.delay = delay;
+    }
 
+    refill() {
+        console.log('[DEBUG1] TokenBucket refill called');
+        const now = Date.now();
+        console.log('[DEBUG1] TokenBucket refill: current time (now):', now);
+        const elapsed = now - this.lastRefill;
+        console.log('[DEBUG1] TokenBucket refill: elapsed time since last refill:', elapsed);
+        const newTokens = Math.floor((elapsed / this.delay) * this.rate);
+        console.log('[DEBUG1] TokenBucket refill: new tokens to add:', newTokens);
+        this.lastRefill = now;
+        this.tokens = Math.min(this.tokens + newTokens, this.capacity);
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket refilled with ${newTokens} tokens. Current tokens: ${this.tokens}`);
+    }
 
+    consume() {
+        console.log('[DEBUG1] TokenBucket consume called');
+        const now = Date.now();
+        const elapsed = now - this.lastRefill;
+        if (elapsed >= this.delay) {
+            this.refill();
+        }
+        console.log('[DEBUG1] TokenBucket consume: state after refill:', this);
+        if (this.tokens > 0) {
+            this.tokens -= 1;
+            console.log('[DEBUG1] TokenBucket consume: tokens available, consuming one token');
+            return true;
+        }
+        console.log('[DEBUG1] TokenBucket consume: no tokens available');
+        return false;
+    }
+}
 
 class EtherscanAPI extends BlockchainAPI {
     constructor(apiKey) {
@@ -489,15 +507,17 @@ class ArbiscanAPI extends BlockchainAPI {
     }
 }
 
+
+
 function initializeAddressTransactionCounts(addresses) {
-    console.log('Initializing address transaction counts for addresses:', addresses);
+    console.log('[DEBUG] [${totalElapsedTime()}s] [initializeAddressTransactionCounts} called');
     const addressTransactionCounts = {};
     addresses.forEach(singleAddress => addressTransactionCounts[singleAddress] = 0);
     return addressTransactionCounts;
 }
 
 function getInputAddresses() {
-    console.log(`[DEBUG] [${totalElapsedTime()}s] getInputAddresses called`);
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [getInputAddresses] called`);
     const inputAddresses = document.getElementById('singleAddress').value;
     const addressArray = inputAddresses.split(',').map(a => a.trim());
     console.log(`[DEBUG] [${totalElapsedTime()}s] Parsed addresses:`, addressArray);
@@ -514,7 +534,6 @@ function totalElapsedTime() {
 function setupEventListeners() {
     console.log(`[DEBUG] Setting up event listeners`);
     document.getElementById('retrieveAndDisplayAllTransactions').addEventListener('click', retrieveAndDisplayAllTransactions);
-    console.log(`[DEBUG] Event listener for submitButton set up`);
 }
 
 function createBlockchainAPIs() {
@@ -547,7 +566,6 @@ function createBlockchainAPIs() {
     }
     return apis;
 }
-
 
 
 
