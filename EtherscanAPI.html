@@ -8,6 +8,21 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
     <link href="https://fonts.googleapis.com/css?family=Poppins:400,500,600,700&display=swap" rel="stylesheet">
     <style>
+        .warning-message {
+            display: none;
+            background-color: #ffcccc;
+            color: #a80000;
+            border: 1px solid #a80000;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        
+        .warning-message.visible {
+            display: block;
+        }
+
         body {
             font-family: 'Poppins', sans-serif;
             margin: 0;
@@ -160,12 +175,46 @@
             color: #343a40;
         }
         
+                .warning-message {
+            display: none;
+            background-color: #ffcccc;
+            color: #a80000;
+            border: 1px solid #a80000;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .spinner {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            margin: -20px 0 0 -20px;
+            border-radius: 50%;
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            border-top-color: #007bff;
+            animation: spin 1s ease-in-out infinite;
+        }
 
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
     </style>
-    <div id="error-message" style="display: none; color: red; font-weight: bold; margin-bottom: 10px;"></div>
+   
+
+
 </head>
 
 <body>
+<div class="spinner"></div>
+ <div id="error-message" style="display: none; color: red; font-weight: bold; margin-bottom: 10px;"></div>
+    <div id="warningMessage" class="warning-message"></div>
+    <div id="warningMessageMaxRetries" class="warning-message"></div>
+    <div id="warningMessageResultWindow" class="warning-message"></div>
+
     <div class="container">
         <header>
             <h1>Explorer Aggregator</h1>
@@ -203,7 +252,11 @@
             <div id="results"></div>
         </section>
     </div>
-</body>
+    <div id="rowCount"></div>
+    <div class="spinner" id="spinner"></div>
+
+
+
 
 <script type="module">
 
@@ -260,10 +313,13 @@ async function retrieveAndDisplayAllTransactions() {
                 'token1155tx',
             ]) {
             // Add a third argument to the TokenBucket constructor for the desired delay (450ms)
-            tokenBuckets.set(`${api.baseUrl}_${transactionType}`, new TokenBucket(1, 1, 1100));
+            tokenBuckets.set(`${api.baseUrl}_${transactionType}`, new TokenBucket(1, 1, 1700));
             console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Created token bucket for ${api.baseUrl}_${transactionType}`);
         }
     }
+    
+    const spinnerElement = document.getElementById('spinner');
+    spinnerElement.style.display = 'inline-block';
 
     console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Fetching all transactions`);
     let i = await getAllTransactions(e, a, [t, n], tokenBuckets);
@@ -275,6 +331,7 @@ async function retrieveAndDisplayAllTransactions() {
     
     console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Displaying transactions`);
     displayTransactions(a, i);
+    spinnerElement.style.display = 'none';
 }
 
 
@@ -406,12 +463,18 @@ async function getPaginatedAddressTransactions(singleAddress, singleTransactionT
         console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] called with page:`, page, 'retryCount:', retryCount);
         if (retryCount > 20) {
             console.error(`[ERROR] [${totalElapsedTime()}s] Max retries exceeded for singleAddress ${singleAddress}; singleTransactionType: ${singleTransactionType}; endpoint: ${api}`, api);
+            
+           
+            const warningMessageMaxRetries = document.getElementById('warningMessageMaxRetries');
+            warningMessageMaxRetries.innerText = `Max retries exceeded for address: ${singleAddress}, transaction type: ${singleTransactionType}, endpoint: ${api.baseUrl}`;
+            warningMessageMaxRetries.classList.add('visible');
+            
             return [];
         }
 
         while (!tokenBucket.consume()) {
             console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
-            await new Promise((resolve) => setTimeout(resolve, 1100));
+            await new Promise((resolve) => setTimeout(resolve, 1700));
         }
 
         const url = buildURL(singleAddress, page);
@@ -425,9 +488,21 @@ async function getPaginatedAddressTransactions(singleAddress, singleTransactionT
             console.log(`[DEBUG1] [${totalElapsedTime()}s] API response:`, data);
 
             const shouldRetry = !(data.status === "1" && data.message === "OK") &&
-                    !(data.status === "0" && data.message === "No transactions found") &&
-                    !(data.status === "0" && data.message === "NOTOK" && data.result === "Error! Missing Or invalid Action name") &&
-                    !(data.status === "0" && data.message.startsWith("UnExpected Exception"));
+		    !(data.status === "0" && data.message === "No transactions found") &&
+		    !(data.status === "0" && data.message === "NOTOK" && data.result === "Error! Missing Or invalid Action name") &&
+		    !(data.status === "0" && data.message.startsWith("UnExpected Exception")) &&
+		    !(data.status === "0" && data.message === "Result window is too large, PageNo x Offset size must be less than or equal to 10000");
+
+
+           if (data.status === "0" && data.message === "Result window is too large, PageNo x Offset size must be less than or equal to 10000") {
+    console.warn(`[WARNING] [${totalElapsedTime()}s] Result window too large. Only the first 10000 records will be returned for singleAddress ${singleAddress}; singleTransactionType: ${singleTransactionType}; endpoint: ${api}`, api);
+
+    const warningMessageResultWindow = document.getElementById('warningMessageResultWindow');
+    warningMessageResultWindow.innerText = `Result window too large. Only the first 10000 records will be returned for address: ${singleAddress}, transaction type: ${singleTransactionType}, endpoint: ${api.baseUrl}`;
+    warningMessageResultWindow.classList.add('visible');
+
+    return [];
+}
 
             if (shouldRetry) {
                 console.log(`[DEBUG1] [${totalElapsedTime()}s] Retrying due to unsatisfactory response with page:`, page, 'retryCount:', retryCount + 1);
@@ -437,9 +512,12 @@ async function getPaginatedAddressTransactions(singleAddress, singleTransactionT
             const records = Array.isArray(data.result) ? data.result : [];
             console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetched records:`, records);
 
+            
             if (records && records.length === 10000) {
+            
                 console.log("[DEBUG] Fetching next page...");
                 const nextPageRecords = await wrappedFetch(page + 1);
+                console.log(`[DEBUG1] [${totalElapsedTime()}s] Returned data:`, records.concat);
                 return records.concat(nextPageRecords);
             }
 
@@ -449,7 +527,7 @@ async function getPaginatedAddressTransactions(singleAddress, singleTransactionT
             console.error(`[ERROR] [${totalElapsedTime()}s] Error fetching data from URL: ${url}`, error);
             if (!tokenBucket.consume()) {
                 console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
-                await new Promise((resolve) => setTimeout(resolve, 1100));
+                await new Promise((resolve) => setTimeout(resolve, 1700));
             }
             console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] Retrying after error with page:`, page, 'retryCount:', retryCount + 1);
             return wrappedFetch(page, retryCount + 1);
@@ -527,10 +605,36 @@ function initializeAddressTransactionCounts(addresses) {
 function getInputAddresses() {
     console.log(`[DEBUG] [${totalElapsedTime()}s] [getInputAddresses] called`);
     const inputAddresses = document.getElementById('singleAddress').value;
-    const addressArray = inputAddresses.split(',').map(a => a.trim());
+    const warningMessageElement = document.getElementById('warningMessage');
+    warningMessageElement.innerHTML = ''; // Clear any previous warning messages
+    warningMessageElement.classList.remove('visible'); // Hide the warning message initially
+
+    const addressSet = new Set(); // Create a Set to hold unique addresses
+    inputAddresses
+        .split(',')
+        .map(a => a.trim())
+        .forEach(a => {
+            if (a !== '' && isValidEthereumAddress(a)) {
+                addressSet.add(a.toLowerCase()); // Add address to set (case-insensitive)
+            } else {
+                warningMessageElement.innerHTML += `Invalid Ethereum address: ${a}<br>`;
+                warningMessageElement.classList.add('visible'); // Make the warning message visible
+            }
+        });
+
+    const addressArray = Array.from(addressSet); // Convert Set to Array
     console.log(`[DEBUG] [${totalElapsedTime()}s] Parsed addresses:`, addressArray);
     return addressArray;
 }
+
+
+function isValidEthereumAddress(address) {
+    const ethAddressPattern = /^0x[a-fA-F0-9]{40}$/;
+    return ethAddressPattern.test(address);
+}
+
+
+
 
 function totalElapsedTime() {
     const currentTime = new Date();
@@ -608,7 +712,13 @@ function displayTransactionTable(transactions) {
     const table = createTransactionTable(transactions);
     resultsDiv.appendChild(table);
     console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Transaction table appended to resultsDiv`);
+
+    // Count the table rows and update the rowCount element
+    const rowCount = transactions.length;
+    const rowCountElement = document.getElementById('rowCount');
+    rowCountElement.innerHTML = `Total table rows: ${rowCount}`;
 }
+
 
 function createTransactionTable(transactions) {
     const table = document.createElement('table');
@@ -693,3 +803,4 @@ function getTransactionTokenSymbol(tx) {
 }
 </script>
 </html>
+</body>
