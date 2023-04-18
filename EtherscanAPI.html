@@ -260,7 +260,7 @@ async function retrieveAndDisplayAllTransactions() {
                 'token1155tx',
             ]) {
             // Add a third argument to the TokenBucket constructor for the desired delay (450ms)
-            tokenBuckets.set(`${api.baseUrl}_${transactionType}`, new TokenBucket(1, 1, 1000));
+            tokenBuckets.set(`${api.baseUrl}_${transactionType}`, new TokenBucket(1, 1, 1100));
             console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Created token bucket for ${api.baseUrl}_${transactionType}`);
         }
     }
@@ -403,54 +403,62 @@ async function getPaginatedAddressTransactions(singleAddress, singleTransactionT
     const tokenBucket = tokenBuckets.get(endpointKey);
 
     const wrappedFetch = async (page = 1, retryCount = 0) => {
-    console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] called with page:`, page, 'retryCount:', retryCount);
-    if (retryCount > 20) {
-        console.error(`[ERROR] [${totalElapsedTime()}s] Max retries exceeded for singleAddress ${singleAddress}; singleTransactionType: ${singleTransactionType}; endpoint: ${api}`, api);
-        return [];
-    }
-
-    while (!tokenBucket.consume()) {
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    const url = buildURL(singleAddress, page);
-    console.log(`[DEBUG1] [${totalElapsedTime()}s] Generated URL: ${url}`);
-
-    try {
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetching data from URL:`, url);
-        const result = await fetch(url);
-        const data = await result.json();
-
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] API response:`, data);
-        if (data.status === "0" && data.message === "NOTOK") {
-            console.error(`[ERROR] [${totalElapsedTime()}s] Problematic response for URL: ${url}`, data);
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] called with page:`, page, 'retryCount:', retryCount);
+        if (retryCount > 20) {
+            console.error(`[ERROR] [${totalElapsedTime()}s] Max retries exceeded for singleAddress ${singleAddress}; singleTransactionType: ${singleTransactionType}; endpoint: ${api}`, api);
+            return [];
         }
 
-        const records = Array.isArray(data.result) ? data.result : [];
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetched records:`, records);
-
-        if (records && records.length === 10000) {
-            console.log("[DEBUG] Fetching next page...");
-            const nextPageRecords = await wrappedFetch(page + 1);
-            return records.concat(nextPageRecords);
-        }
-
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] Returned data:`, records);
-        return records;
-    } catch (error) {
-        console.error(`[ERROR] [${totalElapsedTime()}s] Error fetching data from URL: ${url}`, error);
-        if (!tokenBucket.consume()) {
+        while (!tokenBucket.consume()) {
             console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
-            await new Promise((resolve) => setTimeout(resolve, tokenBucket.delay));
+            await new Promise((resolve) => setTimeout(resolve, 1100));
         }
-        console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] Retrying after error with page:`, page, 'retryCount:', retryCount + 1);
-        return wrappedFetch(page, retryCount + 1);
-    }
-};
 
-return wrappedFetch();
+        const url = buildURL(singleAddress, page);
+        console.log(`[DEBUG1] [${totalElapsedTime()}s] Generated URL: ${url}`);
+
+        try {
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetching data from URL:`, url);
+            const result = await fetch(url);
+            const data = await result.json();
+
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] API response:`, data);
+
+            const shouldRetry = !(data.status === "1" && data.message === "OK") &&
+                    !(data.status === "0" && data.message === "No transactions found") &&
+                    !(data.status === "0" && data.message === "NOTOK" && data.result === "Error! Missing Or invalid Action name") &&
+                    !(data.status === "0" && data.message.startsWith("UnExpected Exception"));
+
+            if (shouldRetry) {
+                console.log(`[DEBUG1] [${totalElapsedTime()}s] Retrying due to unsatisfactory response with page:`, page, 'retryCount:', retryCount + 1);
+                return wrappedFetch(page, retryCount + 1);
+            }
+
+            const records = Array.isArray(data.result) ? data.result : [];
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] Fetched records:`, records);
+
+            if (records && records.length === 10000) {
+                console.log("[DEBUG] Fetching next page...");
+                const nextPageRecords = await wrappedFetch(page + 1);
+                return records.concat(nextPageRecords);
+            }
+
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] Returned data:`, records);
+            return records;
+        } catch (error) {
+            console.error(`[ERROR] [${totalElapsedTime()}s] Error fetching data from URL: ${url}`, error);
+            if (!tokenBucket.consume()) {
+                console.log(`[DEBUG1] [${totalElapsedTime()}s] Token bucket exhausted. Waiting before retrying...`);
+                await new Promise((resolve) => setTimeout(resolve, 1100));
+            }
+            console.log(`[DEBUG1] [${totalElapsedTime()}s] [wrappedFetch] Retrying after error with page:`, page, 'retryCount:', retryCount + 1);
+            return wrappedFetch(page, retryCount + 1);
+        }
+    };
+
+    return wrappedFetch();
 }
+
 
 
 class TokenBucket {
