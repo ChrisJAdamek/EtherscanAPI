@@ -19,6 +19,18 @@
             font-weight: bold;
         }
         
+         .highlighted {
+        background-color: yellow;
+    }
+    
+    .sort-indicator {
+  margin-left: 5px;
+  font-size: 10px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+        
         .warning-message.visible {
             display: block;
         }
@@ -62,7 +74,7 @@
         .grid-container {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            grid-gap: 20px;
+            grid-gap: 40px;
             justify-content: center;
             align-items: center;
         }
@@ -113,6 +125,7 @@
         }
 
         button {
+            width: 100%;
             display: inline-block;
             padding: 6px 12px;
             font-size: 14px;
@@ -175,16 +188,7 @@
             color: #343a40;
         }
         
-                .warning-message {
-            display: none;
-            background-color: #ffcccc;
-            color: #a80000;
-            border: 1px solid #a80000;
-            border-radius: 5px;
-            padding: 15px;
-            margin: 10px 0;
-            font-weight: bold;
-        }
+           
         .spinner {
             display: none;
             position: absolute;
@@ -202,11 +206,17 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        .sort-indicator {
+  margin-left: 5px;
+  cursor: pointer;
+}
+
     </style>
    
 
 
 </head>
+
 
 <body>
 <div class="spinner"></div>
@@ -227,24 +237,29 @@
                         <legend>API Keys</legend>
                         <div>
                             <label for="etherscan-api-key">Etherscan API Key:</label>
-                            <input type="text" id="etherscan-api-key" placeholder="Your Etherscan API Key" required>
+                            <input type="text" id="etherscan-api-key" placeholder="Your Etherscan API Key" required style="width:98%">
+                        </div>
+                        <div>
+                            <label for="polygonscan-api-key">Polygonscan API Key:</label>
+                            <input type="text" id="polygonscan-api-key" placeholder="Your Polygonscan API Key" required style="width:98%">
                         </div>
                         <div>
                             <label for="arbiscan-api-key">Arbiscan API Key:</label>
-                            <input type="text" id="arbiscan-api-key" placeholder="Your Arbiscan API Key" required>
+                            <input type="text" id="arbiscan-api-key" placeholder="Your Arbiscan API Key" required style="width:98%">
                         </div>
-                    </fieldset>
-                    <fieldset>
+                 <br>
                         <legend>Addresses</legend>
                         <div>
-                            <label for="singleAddress">Addresses (comma-separated):</label>
-                            <textarea id="singleAddress" rows="4" placeholder="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae, 0x742d35Cc6634C0532925a3b844Bc454e4438f44e" required></textarea>
+                            <label for="singleAddress"></label>
+                            <textarea id="singleAddress" rows="4" placeholder="0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae, 0x742d35Cc6634C0532925a3b844Bc454e4438f44e" required style="width:98%"></textarea>
                         </div>
-                    </fieldset>
-                    <div>
-                        <label for="retrieveAndDisplayAllTransactions">Fetch and Display Transactions:</label>
+                        <div>
+                       <br>
                         <button id="retrieveAndDisplayAllTransactions" type="button">Fetch and Display Transactions</button>
                     </div>
+                    </fieldset>
+                    
+                    
                 </div>
             </form>
             <div id="summary"></div>
@@ -256,7 +271,63 @@
     <div class="spinner" id="spinner"></div>
 
 
+<script type="module">
+function sortTable(columnIndex) {
+  const table = document.querySelector("table");
+  let rows;
+  let switching = true;
+  let i, x, y, shouldSwitch;
+  let direction = "asc";
+  let switchCount = 0;
 
+  while (switching) {
+    switching = false;
+    rows = table.rows;
+
+    for (i = 1; i < rows.length - 1; i++) {
+      shouldSwitch = false;
+      x = rows[i].getElementsByTagName("TD")[columnIndex];
+      y = rows[i + 1].getElementsByTagName("TD")[columnIndex];
+
+      if (direction === "asc") {
+        if (compareCells(x, y, columnIndex) > 0) {
+          shouldSwitch = true;
+          break;
+        }
+      } else if (direction === "desc") {
+        if (compareCells(x, y, columnIndex) < 0) {
+          shouldSwitch = true;
+          break;
+        }
+      }
+    }
+
+    if (shouldSwitch) {
+      rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+      switching = true;
+      switchCount++;
+    } else {
+      if (switchCount === 0 && direction === "asc") {
+        direction = "desc";
+        switching = true;
+      }
+    }
+  }
+}
+
+function compareCells(x, y, columnIndex) {
+  switch (columnIndex) {
+    case 1: // Timestamp column
+      return new Date(x.innerHTML) - new Date(y.innerHTML);
+    case 4: // Value column
+    case 9: // TX Fee (ETH) column
+      return parseFloat(x.innerHTML) - parseFloat(y.innerHTML);
+    default:
+      return x.innerHTML.localeCompare(y.innerHTML);
+  }
+}
+
+</script>
 
 <script type="module">
 
@@ -301,7 +372,7 @@ async function retrieveAndDisplayAllTransactions() {
     let [t, n] = createBlockchainAPIs();
     let e = getInputAddresses();
     let a = initializeAddressTransactionCounts(e);
-
+    
     // Create token buckets for rate limiting
     const tokenBuckets = new Map();
     for (const api of [t, n]) {
@@ -330,7 +401,7 @@ async function retrieveAndDisplayAllTransactions() {
     console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Hiding error message`);
     
     console.log(`[DEBUG] [${totalElapsedTime()}s] [retrieveAndDisplayAllTransactions] Displaying transactions`);
-    displayTransactions(a, i);
+    displayTransactions(a, i, e);
     spinnerElement.style.display = 'none';
 }
 
@@ -586,13 +657,13 @@ class EtherscanAPI extends BlockchainAPI {
         console.log('EtherscanAPI constructor called with apiKey:', apiKey);
     }
 }
+
 class ArbiscanAPI extends BlockchainAPI {
     constructor(apiKey) {
         super(apiKey, "https://api.arbiscan.io/api");
         console.log('ArbiscanAPI constructor called with apiKey:', apiKey);
     }
 }
-
 
 
 function initializeAddressTransactionCounts(addresses) {
@@ -682,11 +753,10 @@ function createBlockchainAPIs() {
 
 
 
-
-function displayTransactions(addressTransactionCounts, allTransactions) {
+function displayTransactions(addressTransactionCounts, allTransactions, addressArray) {
     console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactions] Displaying transactions with addressTransactionCounts:`, addressTransactionCounts, `allTransactions:`, allTransactions);
     displayTransactionSummary(addressTransactionCounts, allTransactions.length);
-    displayTransactionTable(allTransactions);
+    displayTransactionTable(allTransactions, addressArray);
 }
 
 function displayTransactionSummary(addressTransactionCounts, totalCount) {
@@ -703,15 +773,15 @@ function generateSummaryItems(addressTransactionCounts) {
     return summaryItems;
 }
 
-function displayTransactionTable(transactions) {
+function displayTransactionTable(transactions, addressArray) {
     console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Displaying transaction table with transactions:`);
     const resultsDiv = document.getElementById('results');
     resultsDiv.innerHTML = '';
     transactions.sort((a, b) => parseInt(a.timeStamp) - parseInt(b.timeStamp));
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Sorted transactions:`);
-    const table = createTransactionTable(transactions);
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Sorting transactions:`);
+    const table = createTransactionTable(transactions, addressArray);
     resultsDiv.appendChild(table);
-    console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Transaction table appended to resultsDiv`);
+    console.log(`[DEBUG] [${totalElapsedTime()}s] [displayTransactionTable] Appending results table.`);
 
     // Count the table rows and update the rowCount element
     const rowCount = transactions.length;
@@ -720,42 +790,52 @@ function displayTransactionTable(transactions) {
 }
 
 
-function createTransactionTable(transactions) {
+function createTransactionTable(transactions, addressArray) {
     const table = document.createElement('table');
-    const header = createTransactionTableHeader();
-    const body = createTransactionTableBody(transactions);
-    table.innerHTML = header + body;
+    const thead = document.createElement('thead');
+    const tbody = document.createElement('tbody');
+
+    thead.innerHTML = createTransactionTableHeader();
+    tbody.innerHTML = createTransactionTableBody(transactions, addressArray);
+
+    table.appendChild(thead);
+    table.appendChild(tbody);
+
     return table;
 }
 
+
 function createTransactionTableHeader() {
-    return `
+  return `
     <tr>
-      <th style="width:3%">Type</th>
-      <th style="width:10%">Timestamp</th>
-      <th style="width:7%">TX Hash</th>
-      <th style="width:10%">Function</th>
-      <th style="width:5%">Value</th>
-      <th style="width:7%">Token Symbol</th>
-      <th style="width:15%">From</th>
-      <th style="width:15%">To</th>
-      <th style="width:15%">Contract Address</th>
-      <!--th style="width:5%">TokenID</th-->
-      <th style="width:5%">TX Fee (ETH)</th>
+      <th style="width:3%" onclick="sortTable(0)">Type<span class="sort-indicator">▲▼</span></th>
+      <th style="width:10%" onclick="sortTable(1)">Timestamp<span class="sort-indicator">▲▼</span></th>
+      <th style="width:7%" onclick="sortTable(2)">TX Hash<span class="sort-indicator">▲▼</span></th>
+      <th style="width:10%" onclick="sortTable(3)">Function<span class="sort-indicator">▲▼</span></th>
+      <th style="width:5%" onclick="sortTable(4)">Value<span class="sort-indicator">▲▼</span></th>
+      <th style="width:7%" onclick="sortTable(5)">Token Symbol<span class="sort-indicator">▲▼</span></th>
+      <th style="width:15%" onclick="sortTable(6)">From<span class="sort-indicator">▲▼</span></th>
+      <th style="width:15%" onclick="sortTable(7)">To<span class="sort-indicator">▲▼</span></th>
+      <th style="width:15%" onclick="sortTable(8)">Contract Address<span class="sort-indicator">▲▼</span></th>
+      <th style="width:5%" onclick="sortTable(9)">TX Fee (ETH)<span class="sort-indicator">▲▼</span></th>
     </tr>
   `;
 }
 
-function createTransactionTableBody(transactions) {
-    const tableBody = transactions.map(tx => createEachTransactionTableRow(tx)).join('');
+
+
+function createTransactionTableBody(transactions, addressArray) {
+    const tableBody = transactions.map(tx => createEachTransactionTableRow(tx, addressArray)).join('');
     return tableBody;
 }
 
-function createEachTransactionTableRow(tx) {
+function createEachTransactionTableRow(tx, addressArray) {
     const value = getTransactionValue(tx);
     const tokenSymbol = getTransactionTokenSymbol(tx);
     const transactionFee = ((parseInt(tx.gasPrice) * parseInt(tx.gasUsed)) / 1e18).toFixed(6);
     const functionName = tx.functionName ? tx.functionName.split('(')[0] : '';
+    const fromHighlight = addressArray.includes(tx.from.toLowerCase()) ? 'highlighted' : '';
+    const toHighlight = addressArray.includes(tx.to.toLowerCase()) ? 'highlighted' : '';
     const tableRow = `
         <tr>
             <td>${tx.type}</td>
@@ -764,8 +844,8 @@ function createEachTransactionTableRow(tx) {
             <td>${functionName}</td>
             <td>${value}</td>
             <td>${tokenSymbol}</td>
-            <td>${tx.from}</td>
-            <td>${tx.to}</td>
+            <td class="${fromHighlight}">${tx.from}</td>
+            <td class="${toHighlight}">${tx.to}</td>
             <td>${tx.contractAddress}</td>
             <!--td>${tx.tokenID ?? 'N/A'}</td-->
             <td>${transactionFee}</td>
@@ -802,5 +882,5 @@ function getTransactionTokenSymbol(tx) {
     }
 }
 </script>
-</html>
 </body>
+</html>
